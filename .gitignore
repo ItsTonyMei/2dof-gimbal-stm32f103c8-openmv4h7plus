@@ -1,0 +1,41 @@
+# Build output
+stm32/OBJ/
+stm32/MDK-ARM/*.bak
+stm32/MDK-ARM/*.dep
+stm32/MDK-ARM/*.build_log.htm
+stm32/MDK-ARM/*.htm
+stm32/MDK-ARM/*.hex
+stm32/MDK-ARM/*.axf
+stm32/MDK-ARM/*.map
+stm32/MDK-ARM/*.lnp
+stm32/MDK-ARM/*.sct
+stm32/MDK-ARM/*.dbgconf
+stm32/MDK-ARM/*.scvd
+stm32/MDK-ARM/*.uvguix.*
+
+# Keil UXpanded files
+*.bak
+*.dep
+*.lst
+*.cod
+*.plg
+
+# OpenMV
+__pycache__/
+*.pyc
+*.pyo
+.openmv_disk
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Editor
+.vscode/
+.idea/
+*.sublime-*
+
+# Git
+.git/
