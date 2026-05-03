@@ -72,9 +72,11 @@ UART_CHANNEL = 3
 # QVGA(320x240): 中心(160,120) → (160/320*255, 120/240*255) ≈ (128, 128)
 HEADER1 = 0xFF
 HEADER2 = 0xFE
-IMAGE_H = 320    # 归一化基准(像素宽度)
-IMAGE_V = 240    # 归一化基准(像素高度)
-IMAGE_CENTER = 128  # 归一化坐标中心，与STM32 control.c OPENMV_CENTER_X/Y=128 对齐
+IMAGE_W = 320    # 归一化基准(像素宽度)
+IMAGE_H = 240    # 归一化基准(像素高度)
+PIXEL_CENTER_X = IMAGE_W // 2
+PIXEL_CENTER_Y = IMAGE_H // 2
+PROTOCOL_CENTER = 128  # 归一化坐标中心，与STM32 control.c OPENMV_CENTER_X/Y=128 对齐
 
 # =============================================================================
 # 全局变量
@@ -84,12 +86,11 @@ uart = None
 frame_count = 0
 detect_count = 0
 last_detect_time = 0
-last_known_cx = IMAGE_CENTER
-last_known_cy = IMAGE_CENTER
+last_known_cx = PIXEL_CENTER_X
+last_known_cy = PIXEL_CENTER_Y
 frames_since_detection = 0
 
-# Last-known-position 缓冲
-LAST_KNOWN_FRAMES = 5   # 最多续命5帧
+# 目标丢失时立即回传画面中心且hasBlob=0, STM32端保持当前位置
 
 # =============================================================================
 # 函数: 初始化摄像头
@@ -137,8 +138,8 @@ def send_blob_position(cx, cy, has_blob=True):
     hasBlob = 1 if has_blob else 0
 
     # 转换为归一化坐标 (0-255)
-    tx = int((cx / IMAGE_H) * 255)
-    ty = int((cy / IMAGE_V) * 255)
+    tx = int(round((cx / IMAGE_W) * 255))
+    ty = int(round((cy / IMAGE_H) * 255))
     tx = max(0, min(255, tx))
     ty = max(0, min(255, ty))
 
@@ -166,8 +167,8 @@ def detect_blob():
     img = sensor.snapshot()
     frame_count += 1
 
-    raw_cx = IMAGE_CENTER
-    raw_cy = IMAGE_CENTER
+    raw_cx = PIXEL_CENTER_X
+    raw_cy = PIXEL_CENTER_Y
     has_blob = False
 
     # 查找色块
@@ -190,14 +191,10 @@ def detect_blob():
         has_blob = True
         detect_count += 1
     else:
-        # 色块丢失: 使用 LKP 缓冲续命
+        # 色块丢失: 立即回中并发送hasBlob=0, 由STM32保持当前位置
         frames_since_detection += 1
-        if frames_since_detection <= LAST_KNOWN_FRAMES:
-            pass  # 保持 last_known_cx/y 不变
-        else:
-            # 超过缓冲帧数: 回中
-            last_known_cx = IMAGE_CENTER
-            last_known_cy = IMAGE_CENTER
+        last_known_cx = PIXEL_CENTER_X
+        last_known_cy = PIXEL_CENTER_Y
 
     # 更新 last-known-position
     if has_blob:

@@ -234,6 +234,11 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 }
 
 /* USER CODE BEGIN 1 */
+#define OPENMV_PAYLOAD_LEN  3U
+#define PC_PAYLOAD_LEN      8U
+#define PC_DATA_LEN         7U
+#define PC_BCC_INDEX        (PC_PAYLOAD_LEN - 1U)
+
 /**************************************************************************
  * 函数功能: USART1发送单个字节
  * 入口参数: data-要发送的数据
@@ -252,21 +257,24 @@ void usart1_send(u8 data)
  **************************************************************************/
 void usart1_sendAngleBlock(int Angle_A, int Angle_B)
 {
-	int BlockCheck = 0;
+	u8 i;
+	u8 BlockCheck = 0;
+	u8 payload[PC_PAYLOAD_LEN] = {
+		(u8)Angle_A, (u8)Angle_B, 0, 0, 0, 0, 0, 0
+	};
 
-	BlockCheck = Angle_A ^ BlockCheck;
-	BlockCheck = Angle_B ^ BlockCheck; // 用于校验位
+	for(i = 0; i < PC_DATA_LEN; i++)
+	{
+		BlockCheck ^= payload[i];
+	}
+	payload[PC_BCC_INDEX] = BlockCheck;
 
 	usart1_send(0xff);       // 帧头
 	usart1_send(0xfe);       // 帧头
-	usart1_send(Angle_A);    // 云台A角度
-	usart1_send(Angle_B);    // 云台B角度
-	usart1_send(0);
-	usart1_send(0);
-	usart1_send(0);
-	usart1_send(0);
-	usart1_send(0);
-	usart1_send(BlockCheck);    // BCC校验位
+	for(i = 0; i < PC_PAYLOAD_LEN; i++)
+	{
+		usart1_send(payload[i]);
+	}
 }
 /**************************************************************************
  * 函数功能: USART3发送单个字节
@@ -285,43 +293,54 @@ void usart3_send(u8 data)
  **************************************************************************/
 void usart3_sendAngleBlock(int Angle_A, int Angle_B)
 {
-	int BlockCheck = 0;
+	u8 i;
+	u8 BlockCheck = 0;
+	u8 payload[PC_PAYLOAD_LEN] = {
+		(u8)Angle_A, (u8)Angle_B, 0, 0, 0, 0, 0, 0
+	};
 
-	BlockCheck = Angle_A ^ BlockCheck;
-	BlockCheck = Angle_B ^ BlockCheck; // 用于校验位
+	for(i = 0; i < PC_DATA_LEN; i++)
+	{
+		BlockCheck ^= payload[i];
+	}
+	payload[PC_BCC_INDEX] = BlockCheck;
 
 	usart3_send(0xff);       // 帧头
 	usart3_send(0xfe);       // 帧头
-	usart3_send(Angle_A);    // 云台A角度
-	usart3_send(Angle_B);    // 云台B角度
-	usart3_send(0);
-	usart3_send(0);
-	usart3_send(0);
-	usart3_send(0);
-	usart3_send(0);
-	usart3_send(BlockCheck);    // BCC校验位
+	for(i = 0; i < PC_PAYLOAD_LEN; i++)
+	{
+		usart3_send(payload[i]);
+	}
 }
 
 // ============================================================
 // USART3 OpenMV 视觉协议 (5字节帧)
 // 帧格式: [0xFF][0xFE][hasBlob][tx][ty]
 //   hasBlob: 0x01=检测到目标, 0x00=未检测
-//   tx/ty:   归一化坐标 0-255, 127=中心 (与OpenMV侧IMAGE_CENTER对齐)
+//   tx/ty:   归一化坐标 0-255, 128=中心
 // ============================================================
 typedef struct {
     u8 count;            // 已接收payload字节数 (0-3)
     u8 last_data;         // 上一个接收字节
     u8 last_last_data;    // 上上一个接收字节
     u8 head_received;     // 帧头已锁定标志
-    u8 payload[3];        // [hasBlob, tx, ty]
-} UART_RxState;
+    u8 payload[OPENMV_PAYLOAD_LEN]; // [hasBlob, tx, ty]
+} OpenMV_RxState;
+
+typedef struct {
+    u8 count;            // 已接收payload字节数 (0-8)
+    u8 last_data;
+    u8 last_last_data;
+    u8 head_received;
+    u8 payload[PC_PAYLOAD_LEN];     // angle_bottom, angle_top, reserved x5, bcc
+} Pc_RxState;
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef*huart)
 {
     if(huart == &huart3)
     {
         u8 temp;
-        static UART_RxState usart3_state = {0};
+        static OpenMV_RxState usart3_state = {0};
 
         temp = Usart3_Receive_buf[0];
 
@@ -339,7 +358,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef*huart)
         if(usart3_state.head_received == 1)
         {
             // 安全检查: count必须在有效范围0-2
-            if(usart3_state.count >= 3)
+            if(usart3_state.count >= OPENMV_PAYLOAD_LEN)
             {
                 // 超出范围,重置状态机
                 usart3_state.head_received = 0;
@@ -352,7 +371,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef*huart)
             }
 
             // 收齐3字节后写入全局缓冲区，唤醒控制任务
-            if(usart3_state.count == 3)
+            if(usart3_state.count == OPENMV_PAYLOAD_LEN)
             {
                 // OpenMV_Rxbuf[0]=hasBlob, [1]=tx, [2]=ty
                 OpenMV_Rxbuf[0] = usart3_state.payload[0];
@@ -377,7 +396,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef*huart)
 		u8 temp;
 		u8 i;
 		u8 check;
-		static UART_RxState usart1_state = {0};
+		static Pc_RxState usart1_state = {0};
 
 		temp=Usart1_Receive_buf[0];
 		if(usart1_state.head_received==0)
@@ -390,8 +409,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef*huart)
 		}
 		if(usart1_state.head_received==1)
 		{
-			// 安全检查: count必须在有效范围0-8
-			if(usart1_state.count >= 9)
+			// 安全检查: count必须在有效范围0-7
+			if(usart1_state.count >= PC_PAYLOAD_LEN)
 			{
 				usart1_state.head_received = 0;
 				usart1_state.count = 0;
@@ -401,16 +420,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef*huart)
 				usart1_state.payload[usart1_state.count] = temp;
 				usart1_state.count++;
 			}
-			if(usart1_state.count==9)   // 等待收到完整的9字节后再进行BCC校验（10字节帧：header 2 + 数据8）
+			if(usart1_state.count==PC_PAYLOAD_LEN)   // 10字节帧：header 2 + payload 8
 			{
 				check=0;
-				for(i=0; i<8; i++)
+				for(i=0; i<PC_DATA_LEN; i++)
 				{
 					check ^= usart1_state.payload[i];
 				}
-				if(check==usart1_state.payload[8])   // payload[8]是BCC校验字节
+				if(check==usart1_state.payload[PC_BCC_INDEX])   // payload最后1字节是BCC
 				{
-					for(i=0; i<8; i++)
+					for(i=0; i<PC_PAYLOAD_LEN; i++)
 					{
 						Pc_Rxbuf[i]=usart1_state.payload[i];
 					}

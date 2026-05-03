@@ -26,13 +26,14 @@ All rights reserved
 // 注意: OpenMV QVGA(320x240), 中心(160,120) → (128,128)
 #define OPENMV_CENTER_X        128     // 图像中心X坐标（协议坐标系，0-255范围，128为中心）
 #define OPENMV_CENTER_Y        128     // 图像中心Y坐标
-#define OPENMV_GAIN_X          8.0f    // Full-scale X error -> max PWM step per frame
-#define OPENMV_GAIN_Y          6.0f    // Full-scale Y error -> max PWM step per frame
-#define OPENMV_DEAD_ZONE       5       // 死区像素 (小于此偏差不响应,减少抖动)
 #define OPENMV_STALE_TIMEOUT_MS 300U   // 数据陈旧超时时间(ms)
 #define OPENMV_MAX_DELTA       10.0f   // 每次最大增量限制,防止跳变
-#define OPENMV_RETURN_CENTER_DELAY_MS 2000U  // 目标丢失后回中延迟(ms)
-#define UART_PAYLOAD_LEN       3
+#define OPENMV_PAYLOAD_LEN     3
+#define PC_PAYLOAD_LEN         8
+#define SERVO_BASE_MIN_PWM     250.0f
+#define SERVO_BASE_MAX_PWM     1250.0f
+#define SERVO_ARM_MIN_PWM      300.0f
+#define SERVO_ARM_MAX_PWM      1200.0f
 
 // 全局变量
 int Balance_Pwm, Velocity_Pwm, Turn_Pwm;
@@ -49,6 +50,9 @@ u32 OpenMV_Last_Update = 0;    // 最后更新时间(ms)
 // 归一化误差（-0.5~+0.5）
 float OpenMV_Error_X = 0;       // 水平偏差
 float OpenMV_Error_Y = 0;       // 垂直偏差
+
+static float Clamp_Float(float value, float min_value, float max_value);
+static void OpenMV_Hold_Current_Position(void);
 
 /**************************************************************************
   函数功能: 定时器中断回调 - 所有控制逻辑在此执行
@@ -118,6 +122,9 @@ void Set_Pwm(float velocity1, float velocity2)
     Position1 += velocity1;     // 速度的积分,得到当前位置
     Position2 += velocity2;
 
+    Position1 = Clamp_Float(Position1, SERVO_BASE_MIN_PWM, SERVO_BASE_MAX_PWM);
+    Position2 = Clamp_Float(Position2, SERVO_ARM_MIN_PWM, SERVO_ARM_MAX_PWM);
+
     // 写入到STM32的寄存器
     TIM4->CCR3 = Position1;      // GPIOB8,底舵机控制
     TIM4->CCR4 = Position2;       // GPIOB9,摇臂舵机
@@ -171,20 +178,12 @@ int angle_to_pwm_270(float angle)
 **************************************************************************/
 void Xianfu_Pwm(void)
 {
-    // 底舵机限制范围: 0-270度
-    int Limit_Base_Max = angle_to_pwm_270(270);
-    int Limit_Base_Min = angle_to_pwm_270(0);
-
-    // 摇臂舵机限制范围: 9-171度
-    int Limit_Arm_Max = angle_to_pwm_180(171);
-    int Limit_Arm_Min = angle_to_pwm_180(9);
-
     // Target1为底舵机, Target2为摇臂舵机
-    if(Target1 < Limit_Base_Min) Target1 = Limit_Base_Min;
-    if(Target1 > Limit_Base_Max) Target1 = Limit_Base_Max;
+    if(Target1 < SERVO_BASE_MIN_PWM) Target1 = SERVO_BASE_MIN_PWM;
+    if(Target1 > SERVO_BASE_MAX_PWM) Target1 = SERVO_BASE_MAX_PWM;
 
-    if(Target2 < Limit_Arm_Min) Target2 = Limit_Arm_Min;
-    if(Target2 > Limit_Arm_Max) Target2 = Limit_Arm_Max;
+    if(Target2 < SERVO_ARM_MIN_PWM) Target2 = SERVO_ARM_MIN_PWM;
+    if(Target2 > SERVO_ARM_MAX_PWM) Target2 = SERVO_ARM_MAX_PWM;
 }
 
 /**************************************************************************
@@ -194,7 +193,7 @@ void Xianfu_Pwm(void)
 **************************************************************************/
 void Xianfu_Velocity(void)
 {
-    // OpenMV模式: 跳过限幅(OpenMV_Control已做clamping),避免截断PD输出
+    // OpenMV模式: OpenMV_Control已按OPENMV_MAX_DELTA做独立限幅
     if(OpenMV_Armed) return;
 
     int Amplitude_H = Speed, Amplitude_L = -Speed;
@@ -281,6 +280,25 @@ int myabs(int a)
     return temp;
 }
 
+static float Clamp_Float(float value, float min_value, float max_value)
+{
+    if(value < min_value) return min_value;
+    if(value > max_value) return max_value;
+    return value;
+}
+
+static void OpenMV_Hold_Current_Position(void)
+{
+    Velocity1 = 0;
+    Velocity2 = 0;
+    Target1 = Position1;
+    Target2 = Position2;
+    OpenMV_Armed = 1;
+    OpenMV_Target_Lost = 1;
+    OpenMV_Error_X = 0.0f;
+    OpenMV_Error_Y = 0.0f;
+}
+
 /**************************************************************************
   函数功能: PC串口控制 - 通过BCC校验解析目标角度对应PWM值
   输入参数: 无
@@ -288,7 +306,7 @@ int myabs(int a)
 **************************************************************************/
 void Usart_Control()
 {
-    u8 payload[UART_PAYLOAD_LEN];
+    u8 payload[PC_PAYLOAD_LEN];
     u8 i;
     uint32_t primask;
 
@@ -300,7 +318,7 @@ void Usart_Control()
     // 临界区保护
     primask = __get_PRIMASK();
     __disable_irq();
-    for(i = 0; i < UART_PAYLOAD_LEN; i++)
+    for(i = 0; i < PC_PAYLOAD_LEN; i++)
     {
         payload[i] = Pc_Rxbuf[i];
     }
@@ -352,12 +370,11 @@ void Key_Scan(void)
 void OpenMV_Control(void)
 {
     static uint32_t last_frame_tick = 0;
-    static uint32_t target_lost_tick = 0;    // 目标丢失起始时刻
     static float last_error_x = 0.0f, last_error_y = 0.0f;
     static float yaw_deriv = 0.0f, pitch_deriv = 0.0f;  // D项低通滤波状态
     float error_x = 0.0f, error_y = 0.0f;
 
-    u8 payload[UART_PAYLOAD_LEN];
+    u8 payload[OPENMV_PAYLOAD_LEN];
     u8 i;
     u8 hasBlob;
     u8 target_x;
@@ -371,16 +388,26 @@ void OpenMV_Control(void)
     // 检查是否有新数据
     if(OpenMV_Usart_Compelet == 0)
     {
-        // 无新数据,检查是否超时
-        if(last_frame_tick != 0U && (now - last_frame_tick) > OPENMV_STALE_TIMEOUT_MS)
+        // 无新数据时也保持OpenMV接管,避免在视觉帧间回落到Position_PID
+        Velocity1 = 0;
+        Velocity2 = 0;
+        Target1 = Position1;
+        Target2 = Position2;
+        OpenMV_Armed = 1;
+        if(last_frame_tick == 0U || (now - last_frame_tick) > OPENMV_STALE_TIMEOUT_MS)
         {
-            // 数据超时: 通过主循环停止PWM输出（统一控制流）
-            Velocity1 = 0;
-            Velocity2 = 0;
-            OpenMV_Armed = 1;  // 接管，让主循环处理停止
-            last_frame_tick = 0U;
             OpenMV_Data_Stale = 1;
             OpenMV_Target_Lost = 1;
+            OpenMV_Error_X = 0.0f;
+            OpenMV_Error_Y = 0.0f;
+            yaw_deriv = 0.0f;
+            pitch_deriv = 0.0f;
+            last_error_x = 0.0f;
+            last_error_y = 0.0f;
+        }
+        else
+        {
+            OpenMV_Data_Stale = 0;
         }
         return;
     }
@@ -388,7 +415,7 @@ void OpenMV_Control(void)
     // 复制数据到本地缓冲区 (临界区保护)
     primask = __get_PRIMASK();
     __disable_irq();
-    for(i = 0; i < UART_PAYLOAD_LEN; i++)
+    for(i = 0; i < OPENMV_PAYLOAD_LEN; i++)
     {
         payload[i] = OpenMV_Rxbuf[i];
     }
@@ -398,15 +425,27 @@ void OpenMV_Control(void)
         __enable_irq();
     }
 
+    // payload[0]=hasBlob, [1]=tx, [2]=ty (5字节协议: 帧头2字节在状态机中已跳过)
+    hasBlob = payload[0];
+    target_x = payload[1];
+    target_y = payload[2];
+    detect_flag = hasBlob;  // hasBlob 0x01=检测到, 0x00=未检测
+
+    if(detect_flag != 0x00 && detect_flag != 0x01)
+    {
+        OpenMV_Hold_Current_Position();
+        OpenMV_Data_Stale = 1;
+        last_frame_tick = 0U;
+        yaw_deriv = 0.0f;
+        pitch_deriv = 0.0f;
+        last_error_x = 0.0f;
+        last_error_y = 0.0f;
+        return;
+    }
+
     last_frame_tick = now;
     OpenMV_Last_Update = now;
     OpenMV_Data_Stale = 0;  // 数据新鲜
-
-    // OpenMV_Rxbuf[0]=hasBlob, [1]=tx, [2]=ty (5字节协议: 帧头2字节在状态机中已跳过)
-    hasBlob = OpenMV_Rxbuf[0];
-    target_x = OpenMV_Rxbuf[1];
-    target_y = OpenMV_Rxbuf[2];
-    detect_flag = hasBlob;  // hasBlob 0x01=检测到, 0x00=未检测
 
     if(detect_flag == 0x01)
     {
@@ -476,34 +515,27 @@ void OpenMV_Control(void)
         // 直接设置Velocity（OpenMV velocity-mode）
         // OpenMV_Armed=1告知主循环跳过Position_PID，避免双环积分冲突
         // 注意: velocity-mode符号与位置积分模式相反，取反以匹配追踪方向
-        Velocity1 = -yaw_pwm;
-        Velocity2 = -pitch_pwm;
+        Velocity1 = Clamp_Float(-(float)yaw_pwm, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
+        Velocity2 = Clamp_Float(-(float)pitch_pwm, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
         OpenMV_Armed = 1;
 
         // 限制 Target 范围在舵机有效行程内
-        // 底舵机(270度): 250~1250, 摇臂舵机(180度): 300~1200
-        if(Target1 > 1250) Target1 = 1250;
-        else if(Target1 < 250) Target1 = 250;
-        if(Target2 > 1200) Target2 = 1200;
-        else if(Target2 < 300) Target2 = 300;
+        if(Target1 > SERVO_BASE_MAX_PWM) Target1 = SERVO_BASE_MAX_PWM;
+        else if(Target1 < SERVO_BASE_MIN_PWM) Target1 = SERVO_BASE_MIN_PWM;
+        if(Target2 > SERVO_ARM_MAX_PWM) Target2 = SERVO_ARM_MAX_PWM;
+        else if(Target2 < SERVO_ARM_MIN_PWM) Target2 = SERVO_ARM_MIN_PWM;
 
         last_error_x = error_x;
         last_error_y = error_y;
-        target_lost_tick = 0;  // 重新检测到目标，清零丢失计时
         OpenMV_Target_Lost = 0;  // 目标存在
     }
     else
     {
         // 目标丢失: 停在当前位置
-        Velocity1 = 0;
-        Velocity2 = 0;
-        OpenMV_Armed = 0;
+        OpenMV_Hold_Current_Position();
         yaw_deriv = 0.0f;
         pitch_deriv = 0.0f;
         last_error_x = 0.0f;
         last_error_y = 0.0f;
-        OpenMV_Error_X = 0.0f;
-        OpenMV_Error_Y = 0.0f;
-        OpenMV_Target_Lost = 1;
     }
 }
