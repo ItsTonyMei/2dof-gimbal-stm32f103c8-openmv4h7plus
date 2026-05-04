@@ -26,34 +26,34 @@
 #endif
 //////////////////////////////////////////////////////////////////
 //重定向此文件,支持printf函数,不需要勾选use MicroLIB
-#if 1
-#if defined(__ARMCC_VERSION) && (__ARMCC_VERSION < 6000000)
-#pragma import(__use_no_semihosting)
+#ifdef __ARMCC_VERSION
+  // ARM Compiler (Keil): semihosting + FILE typedef stubs
+  #if (__ARMCC_VERSION < 6000000)
+  #pragma import(__use_no_semihosting)
+  #endif
+  #if !defined(FILE)
+  typedef struct __FILE FILE;
+  #endif
+  #ifndef __stdout
+  FILE __stdout;
+  #define __stdout __stdout
+  #endif
 #endif
-//标准库需要的支持函数
-// ARM/Keil stdio.h defines FILE type, so we don't redefine it
-#if !defined(FILE)
-typedef struct __FILE FILE;
-#endif
-
-#ifndef __stdout
-FILE __stdout;
-#define __stdout __stdout
-#endif
+// semihosting stubs (required by both ARMCC and GCC newlib)
 //定义 _sys_exit() 以避免使用半主机模式
 void _sys_exit(int x)
 {
 	x = x;
 	while(1);  // never returns — halts CPU on semihosting exit
 }
-//重定向 fputc 函数
+//重定向 fputc 函数 — printf 输出到 USART1
 int fputc(int ch, FILE *f)
 {
+	(void)f;  // unused in embedded printf redirect
 	while((USART1->SR&0X40)==0);	// 等待发送完成
 	USART1->DR = (u8) ch;
 	return ch;
 }
-#endif
 u8 Usart3_Receive_buf[1];          // 串口3单字节中断接收缓冲
 u8 Usart1_Receive_buf[1];          // 串口1单字节中断接收缓冲
 volatile uint32_t OpenMV_Frame_Count = 0;

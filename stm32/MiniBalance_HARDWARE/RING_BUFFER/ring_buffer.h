@@ -2,6 +2,7 @@
 #define __RING_BUFFER_H
 
 #include "sys.h"
+#include <stdbool.h>
 
 #define RING_BUFFER_SIZE 256
 

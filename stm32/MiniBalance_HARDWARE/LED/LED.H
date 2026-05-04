@@ -20,8 +20,16 @@ All rights reserved
 #define __LED_H
 #include "sys.h"
 
-//LED �˿ڶ���
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+//LED ?????
 #define LED PAout(4)  
-void LED_Init(void);  //��ʼ��
+void LED_Init(void);  //?????
 void Led_Flash(u16 time);
+
+#ifdef __cplusplus
+}
+#endif
 #endif
