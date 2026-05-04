@@ -36,6 +36,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+// 调试开关: 在Keil中定义 DEBUG_PRINTF 宏以启用串口调试输出
+// 或在编译选项中添加 -DDEBUG_PRINTF
+// 未定义时所有 printf 调用被跳过,避免阻塞主循环
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -162,9 +165,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+#ifdef DEBUG_PRINTF
 	printf("\r\n");
 	printf("底舵机角度: %.0f\r\n", (Target1-250)/1000*270);
 	printf("摇臂角度: %.0f\r\n", (Target2-250)/1000*180);
+#endif
 	PS2_LX=PS2_AnologData(PSS_LX);
 	PS2_LY=PS2_AnologData(PSS_LY);
 	PS2_KEY=PS2_DataKey();
@@ -172,6 +177,7 @@ int main(void)
 	Voltage_All+=Get_battery_volt();
 	if(++Voltage_Count==100) Voltage=Voltage_All/100,Voltage_All=0,Voltage_Count=0;
 
+#ifdef DEBUG_PRINTF
 	// OpenMV调试打印 (每500ms一次)
 	{
 		static uint32_t dbg_tick = 0;
@@ -184,6 +190,7 @@ int main(void)
 				OpenMV_Target_Lost);
 		}
 	}
+#endif
 
 	delay_ms(5);
   }

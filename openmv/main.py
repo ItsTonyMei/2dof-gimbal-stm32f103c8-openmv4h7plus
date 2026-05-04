@@ -47,13 +47,14 @@ SENSOR_FRAMESIZE = sensor.QVGA    # 320x240
 SENSOR_PIXFORMAT = sensor.RGB565
 
 # 颜色追踪色块阈值 (LAB格式)
-# 建议颜色:
-#   绿色:  [(30, 50, -20, 20, 20, 70)]   # 绿色物体
-#   蓝色:  [(20, 40, 10, 30, -60, -20)]  # 蓝色物体
-#   红色:  [(60, 80, 30, 70, 10, 50)]    # 红色物体
+# 当前配置: 用户自定义绿色阈值
+# ========== 常用参考阈值 (先用此值测试，再微调) ==========
+#   绿色参考:  [(30, 50, -20, 20, 20, 70)]
+#   蓝色参考:  [(20, 40, 10, 30, -60, -20)]
+#   红色参考:  [(60, 80, 30, 70, 10, 50)]
 # 如需多颜色追踪, 在列表中加多个元组即可
 COLOR_THRESHOLDS = [
-    (0, 100, -128, -15, 0, 127),   # 绿色 (用户配置)
+    (0, 100, -128, -15, 0, 127),   # 当前: 用户自定义绿色阈值
 ]
 
 # 色块追踪参数
@@ -88,7 +89,6 @@ detect_count = 0
 last_detect_time = 0
 last_known_cx = PIXEL_CENTER_X
 last_known_cy = PIXEL_CENTER_Y
-frames_since_detection = 0
 
 # 目标丢失时立即回传画面中心且hasBlob=0, STM32端保持当前位置
 
@@ -162,7 +162,7 @@ def detect_blob():
     使用LAB颜色空间阈值分割,帧率30-60fps
     """
     global frame_count, detect_count
-    global last_known_cx, last_known_cy, frames_since_detection
+    global last_known_cx, last_known_cy
 
     img = sensor.snapshot()
     frame_count += 1
@@ -192,7 +192,6 @@ def detect_blob():
         detect_count += 1
     else:
         # 色块丢失: 立即回中并发送hasBlob=0, 由STM32保持当前位置
-        frames_since_detection += 1
         last_known_cx = PIXEL_CENTER_X
         last_known_cy = PIXEL_CENTER_Y
 
@@ -200,7 +199,6 @@ def detect_blob():
     if has_blob:
         last_known_cx = raw_cx
         last_known_cy = raw_cy
-        frames_since_detection = 0
 
     cx = int(round(last_known_cx))
     cy = int(round(last_known_cy))

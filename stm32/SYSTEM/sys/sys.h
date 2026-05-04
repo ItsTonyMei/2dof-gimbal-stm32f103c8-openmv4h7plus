@@ -153,7 +153,6 @@ void MSR_MSP(u32 addr);	//设置堆栈地址
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 #include <math.h>
 #endif
 

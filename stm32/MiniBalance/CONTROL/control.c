@@ -493,7 +493,9 @@ void OpenMV_Control(void)
         OpenMV_Error_Y = error_y;
 
         // PD控制: P项响应误差, D项(一阶低通滤波)抑制overshoot/震荡
-        // 注意: dt固定用0.1s，在30-60fps下D项会被放大约3-6倍，KD已用较小值补偿
+        // 注意: dt假定=0.1s (100ms), 但实际帧间隔约17-33ms (30-60fps)
+        //       若将来启用D项(KD>0), 需用真实帧间隔替换硬编码的0.1f
+        //       当前KD=0所以此硬编码dt不影响控制输出
         float alpha = 0.1f;  // 滤波系数小,D项更平滑,抑制高速帧率下的噪声放大
         float filtered_yaw = alpha * ((error_x - last_error_x) / 0.1f) + (1.0f - alpha) * yaw_deriv;
         float filtered_pitch = alpha * ((error_y - last_error_y) / 0.1f) + (1.0f - alpha) * pitch_deriv;
@@ -503,28 +505,16 @@ void OpenMV_Control(void)
         float yaw_out = YAW_KP * error_x + YAW_KD * yaw_deriv;
         float pitch_out = PITCH_KP * error_y + PITCH_KD * pitch_deriv;
 
-        // 转换为 PWM 直接叠加（velocity-mode）
-        // 不再修改 Target1/Target2，避免与 Position_PID 形成双层积分冲突
-        int yaw_pwm = (int)(yaw_out * 500);
-        int pitch_pwm = (int)(pitch_out * 500);
-        if(yaw_pwm > 250) yaw_pwm = 250;
-        else if(yaw_pwm < -250) yaw_pwm = -250;
-        if(pitch_pwm > 250) pitch_pwm = 250;
-        else if(pitch_pwm < -250) pitch_pwm = -250;
-
-        // 直接设置Velocity（OpenMV velocity-mode）
-        // OpenMV_Armed=1告知主循环跳过Position_PID，避免双环积分冲突
+        // 转换为 Velocity（velocity-mode），直接设速度不经过 Target/Position_PID
+        // PD输出(归一化) → velocity单位, 统一经 OPENMV_MAX_DELTA 限幅
         // 注意: velocity-mode符号与位置积分模式相反，取反以匹配追踪方向
-        Velocity1 = Clamp_Float(-(float)yaw_pwm, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
-        Velocity2 = Clamp_Float(-(float)pitch_pwm, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
+        float yaw_vel = -(yaw_out * 500.0f);
+        float pitch_vel = -(pitch_out * 500.0f);
+        Velocity1 = Clamp_Float(yaw_vel, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
+        Velocity2 = Clamp_Float(pitch_vel, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
         OpenMV_Armed = 1;
 
-        // 限制 Target 范围在舵机有效行程内
-        if(Target1 > SERVO_BASE_MAX_PWM) Target1 = SERVO_BASE_MAX_PWM;
-        else if(Target1 < SERVO_BASE_MIN_PWM) Target1 = SERVO_BASE_MIN_PWM;
-        if(Target2 > SERVO_ARM_MAX_PWM) Target2 = SERVO_ARM_MAX_PWM;
-        else if(Target2 < SERVO_ARM_MIN_PWM) Target2 = SERVO_ARM_MIN_PWM;
-
+        // Target 限幅由主循环 Xianfu_Pwm() 统一处理
         last_error_x = error_x;
         last_error_y = error_y;
         OpenMV_Target_Lost = 0;  // 目标存在

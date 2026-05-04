@@ -41,7 +41,7 @@ FILE __stdout;
 #define __stdout __stdout
 #endif
 //定义 _sys_exit() 以避免使用半主机模式
-_sys_exit(int x)
+void _sys_exit(int x)
 {
 	x = x;
 	while(1);  // never returns — halts CPU on semihosting exit
