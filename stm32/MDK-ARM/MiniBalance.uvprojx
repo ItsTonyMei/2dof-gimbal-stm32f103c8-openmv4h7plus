@@ -908,13 +908,10 @@
               <FilePath>..\MiniBalance_HARDWARE\OLED\oled.c</FilePath>
             </File>
             <File>
-            <File>
               <FileName>LED.C</FileName>
               <FileType>1</FileType>
               <FilePath>..\MiniBalance_HARDWARE\LED\LED.C</FilePath>
             </File>
-            <File>
-            <File>
           </Files>
         </Group>
         <Group>
@@ -925,7 +922,6 @@
               <FileType>1</FileType>
               <FilePath>..\MiniBalance\show\show.c</FilePath>
             </File>
-            <File>
             <File>
               <FileName>control.c</FileName>
               <FileType>1</FileType>
