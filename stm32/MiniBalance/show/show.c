@@ -6,8 +6,15 @@ void oled_show(void)
     OLED_ShowString(0, 0,  "MODE: OpenMV");
 
     extern volatile uint32_t OpenMV_Frame_Count;
-    OLED_ShowString(0, 10, "F:");
-    OLED_ShowNumber(12, 10, OpenMV_Frame_Count, 8, 12);
+    static uint32_t last_fc = 0, last_tick = 0, fps = 0;
+    uint32_t now = HAL_GetTick();
+    if(now - last_tick >= 1000U) {
+        last_tick = now;
+        fps = OpenMV_Frame_Count - last_fc;
+        last_fc = OpenMV_Frame_Count;
+    }
+    OLED_ShowString(0, 10, "FPS:");
+    OLED_ShowNumber(28, 10, fps, 3, 12);
 
     extern u8 OpenMV_Target_Lost;
     extern volatile uint8_t OpenMV_Rxbuf[3];
