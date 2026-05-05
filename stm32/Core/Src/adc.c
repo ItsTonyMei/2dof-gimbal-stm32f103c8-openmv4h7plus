@@ -26,7 +26,7 @@
 
 ADC_HandleTypeDef hadc1;
 
-/* ADC1 init function */
+/* ADC1 初始化函数 */
 void MX_ADC1_Init(void)
 {
 
@@ -76,7 +76,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
   /* USER CODE BEGIN ADC1_MspInit 0 */
 
   /* USER CODE END ADC1_MspInit 0 */
-    /* ADC1 clock enable */
+    /* ADC1 时钟使能 */
     __HAL_RCC_ADC1_CLK_ENABLE();
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -101,7 +101,7 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
   /* USER CODE BEGIN ADC1_MspDeInit 0 */
 
   /* USER CODE END ADC1_MspDeInit 0 */
-    /* Peripheral clock disable */
+    /* 外设时钟禁用 */
     __HAL_RCC_ADC1_CLK_DISABLE();
 
     /**ADC1 GPIO Configuration

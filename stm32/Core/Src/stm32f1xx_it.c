@@ -63,10 +63,10 @@ extern UART_HandleTypeDef huart3;
 /* USER CODE END EV */
 
 /******************************************************************************/
-/*           Cortex-M3 Processor Interruption and Exception Handlers          */
+/*           Cortex-M3 处理器中断和异常处理函数                                */
 /******************************************************************************/
 /**
-  * @brief This function handles Non maskable interrupt.
+  * @brief 处理不可屏蔽中断 (NMI)
   */
 void NMI_Handler(void)
 {
@@ -81,7 +81,7 @@ void NMI_Handler(void)
 }
 
 /**
-  * @brief This function handles Hard fault interrupt.
+  * @brief 处理硬件错误中断 (HardFault)
   */
 void HardFault_Handler(void)
 {
@@ -96,7 +96,7 @@ void HardFault_Handler(void)
 }
 
 /**
-  * @brief This function handles Memory management fault.
+  * @brief 处理内存管理错误 (MemManage)
   */
 void MemManage_Handler(void)
 {
@@ -111,7 +111,7 @@ void MemManage_Handler(void)
 }
 
 /**
-  * @brief This function handles Prefetch fault, memory access fault.
+  * @brief 处理预取指令错误和内存访问错误 (BusFault)
   */
 void BusFault_Handler(void)
 {
@@ -126,7 +126,7 @@ void BusFault_Handler(void)
 }
 
 /**
-  * @brief This function handles Undefined instruction or illegal state.
+  * @brief 处理未定义指令或非法状态 (UsageFault)
   */
 void UsageFault_Handler(void)
 {
@@ -141,7 +141,7 @@ void UsageFault_Handler(void)
 }
 
 /**
-  * @brief This function handles System service call via SWI instruction.
+  * @brief 处理系统服务调用 (SVC)
   */
 void SVC_Handler(void)
 {
@@ -154,7 +154,7 @@ void SVC_Handler(void)
 }
 
 /**
-  * @brief This function handles Debug monitor.
+  * @brief 处理调试监视器 (DebugMon)
   */
 void DebugMon_Handler(void)
 {
@@ -167,7 +167,7 @@ void DebugMon_Handler(void)
 }
 
 /**
-  * @brief This function handles Pendable request for system service.
+  * @brief 处理可挂起系统服务请求 (PendSV)
   */
 void PendSV_Handler(void)
 {
@@ -180,7 +180,7 @@ void PendSV_Handler(void)
 }
 
 /**
-  * @brief This function handles System tick timer.
+  * @brief 处理系统滴答定时器 (SysTick)
   */
 void SysTick_Handler(void)
 {
@@ -194,14 +194,12 @@ void SysTick_Handler(void)
 }
 
 /******************************************************************************/
-/* STM32F1xx Peripheral Interrupt Handlers                                    */
-/* Add here the Interrupt Handlers for the used peripherals.                  */
-/* For the available peripheral interrupt handler names,                      */
-/* please refer to the startup file (startup_stm32f1xx.s).                    */
+/* STM32F1xx 外设中断处理函数                                                  */
+/* 在此添加所使用外设的中断处理函数                                              */
 /******************************************************************************/
 
 /**
-  * @brief This function handles TIM2 global interrupt.
+  * @brief 处理 TIM2 全局中断
   */
 void TIM2_IRQHandler(void)
 {
@@ -215,7 +213,7 @@ void TIM2_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles USART1 global interrupt.
+  * @brief 处理 USART1 全局中断
   */
 void USART1_IRQHandler(void)
 {
@@ -229,7 +227,7 @@ void USART1_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles USART3 global interrupt.
+  * @brief 处理 USART3 全局中断
   */
 void USART3_IRQHandler(void)
 {

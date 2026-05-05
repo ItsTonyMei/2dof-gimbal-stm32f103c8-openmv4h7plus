@@ -1,21 +1,21 @@
-# 2-DOF Gimbal — Color Tracking Platform
+# 二自由度云台 — 颜色追踪平台
 
-Two-axis gimbal with **OpenMV4 H7 Plus** color blob tracking + **STM32F103C8T6** servo control.
+基于 **OpenMV4 H7 Plus** 颜色色块追踪 + **STM32F103C8T6** 舵机控制的二轴云台系统。
 
-## Hardware
+## 硬件配置
 
-| Component | Model | Notes |
-|-----------|-------|-------|
-| MCU | STM32F103C8T6 | 72 MHz Cortex-M3, 64 KB Flash, 20 KB RAM |
-| Vision | OpenMV4 H7 Plus | QVGA 320×240, color tracking at 30-60 fps |
-| Base servo | 270° (TIM4 CH3, PB8) | PWM range 250-1250 |
-| Arm servo | 180° (TIM4 CH4, PB9) | PWM range 300-1200 |
-| UART to OpenMV | USART3 (PB11/PB10) | 115200 8N1 |
-| Debug UART | USART1 (PA9/PA10) | printf redirect, 115200 8N1 |
-| Display | SSD1306 OLED 128×64 | Software SPI (PB3/RST, PA15/DC, PB5/SCL, PB4/SDA) |
-| Battery sense | ADC1 IN1 (PA1) | Voltage divider, factor ~11 |
+| 组件 | 型号 | 说明 |
+|------|------|------|
+| 主控 | STM32F103C8T6 | 72 MHz Cortex-M3, 64 KB Flash, 20 KB RAM |
+| 视觉 | OpenMV4 H7 Plus | QVGA 320×240, 颜色追踪 30-60 fps |
+| 底舵机 | 270° (TIM4 CH3, PB8) | PWM 范围 250-1250 |
+| 摇臂舵机 | 180° (TIM4 CH4, PB9) | PWM 范围 300-1200 |
+| 视觉通信 | USART3 (PB11/PB10) | 115200 8N1 |
+| 调试串口 | USART1 (PA9/PA10) | printf 重定向, 115200 8N1 |
+| 显示屏 | SSD1306 OLED 128×64 | 软件 SPI (PB3/RST, PA15/DC, PB5/SCL, PB4/SDA) |
+| 电池检测 | ADC1 IN1 (PA1) | 电阻分压, 系数约 11 |
 
-## Wiring
+## 接线
 
 ```
 OpenMV4 H7 Plus          STM32F103C8T6
@@ -27,122 +27,122 @@ CH9102 USB-UART          STM32F103C8T6
   TX           ────────> PA10 (USART1_RX)
 ```
 
-## Protocol (5-byte, OpenMV → STM32 via USART3)
+## 通信协议 (5字节, OpenMV → STM32, USART3)
 
 ```
 [0xFF] [0xFE] [hasBlob] [tx] [ty]
 ```
 
-| Byte | Field | Description |
-|------|-------|-------------|
-| 0 | `0xFF` | Frame sync 1 |
-| 1 | `0xFE` | Frame sync 2 |
-| 2 | `hasBlob` | `0x01` = target detected, `0x00` = lost |
-| 3 | `tx` | Normalized X: 0-255, 128 = image center |
-| 4 | `ty` | Normalized Y: 0-255, 128 = image center |
+| 字节 | 字段 | 说明 |
+|------|------|------|
+| 0 | `0xFF` | 帧头 1（同步） |
+| 1 | `0xFE` | 帧头 2（同步） |
+| 2 | `hasBlob` | `0x01`=检测到目标, `0x00`=目标丢失 |
+| 3 | `tx` | 归一化 X 坐标: 0-255, 128=图像中心 |
+| 4 | `ty` | 归一化 Y 坐标: 0-255, 128=图像中心 |
 
-**Coordinate mapping** (QVGA 320×240): `tx = round(cx / 320 × 255)`, `ty = round(cy / 240 × 255)`
+**坐标映射** (QVGA 320×240): `tx = round(cx / 320 × 255)`, `ty = round(cy / 240 × 255)`
 
-**Target lost**: OpenMV sends `hasBlob=0x00` with center coordinates. STM32 holds current position via `OpenMV_Hold_Current_Position()`. If no valid frame for 300 ms, velocity zeroes out.
+**目标丢失处理**: OpenMV 发送 `hasBlob=0x00` 和中心坐标。STM32 通过 `OpenMV_Hold_Current_Position()` 保持当前位置。若超过 300 ms 未收到有效帧，速度归零。
 
-There is **no checksum** — the 2-byte header provides self-synchronization on frame loss.
+**无校验和** — 2 字节帧头在数据丢失时自动重新同步。
 
-## Control Architecture
+## 控制架构
 
 ```
 OpenMV (30-60 fps)                  STM32 (TIM2 @ 100 Hz)
-  color blob detection                OpenMV_Control() PD controller
-  → normalize to 0-255                → normalized error (-0.5 ~ +0.5)
-  → send 5-byte frame via UART3       → soft deadzone (5 px inner, 15 px outer)
-                                      → P gain (KP=0.05) → velocity output
-                                      → velocity clamp (±10)
-                                      → Set_Pwm() integrates velocity → position
-                                      → TIM4 CCR3/CCR4 → servos
+  颜色色块检测                         OpenMV_Control() PD 控制器
+  → 归一化到 0-255                    → 归一化误差 (-0.5 ~ +0.5)
+  → 通过 UART3 发送 5 字节帧           → 软死区 (5 px 内死区, 15 px 外过渡)
+                                      → P 增益 (KP=0.05) → 速度输出
+                                      → 速度限幅 (±10)
+                                      → Set_Pwm() 积分速度 → 位置
+                                      → TIM4 CCR3/CCR4 → 舵机
 ```
 
-### PID Parameters
+### PID 参数
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `YAW_KP` / `PITCH_KP` | 0.05 | Proportional gain on normalized error |
-| `YAW_KD` / `PITCH_KD` | 0.0 | Derivative gain (disabled by default) |
-| `INNER_DEADZONE` | 5 px | Complete deadband around center |
-| `OUTER_DEADZONE` | 15 px | Quadratic easing transition zone |
-| `OPENMV_MAX_DELTA` | 10.0 | Max velocity per control cycle |
-| `OPENMV_STALE_TIMEOUT_MS` | 300 | Stale frame timeout |
+| 参数 | 值 | 说明 |
+|------|------|------|
+| `YAW_KP` / `PITCH_KP` | 0.05 | 归一化误差的比例增益 |
+| `YAW_KD` / `PITCH_KD` | 0.0 | 微分增益（默认禁用） |
+| `INNER_DEADZONE` | 5 px | 中心区域完全死区 |
+| `OUTER_DEADZONE` | 15 px | 二次缓动过渡区 |
+| `OPENMV_MAX_DELTA` | 10.0 | 每控制周期最大速度 |
+| `OPENMV_STALE_TIMEOUT_MS` | 300 | 数据超时时间(ms) |
 
-### Servo Limits
+### 舵机限幅
 
-| Servo | Min PWM | Max PWM | Angle |
-|-------|---------|---------|-------|
-| Base (PB8) | 250 | 1250 | 270° |
-| Arm (PB9) | 300 | 1200 | 180° |
+| 舵机 | 最小 PWM | 最大 PWM | 角度 |
+|------|----------|----------|------|
+| 底舵机 (PB8) | 250 | 1250 | 270° |
+| 摇臂舵机 (PB9) | 300 | 1200 | 180° |
 
-## Directory Structure
+## 目录结构
 
 ```
-├── openmv/main.py          # OpenMV color tracking firmware
+├── openmv/main.py          # OpenMV 颜色追踪固件
 ├── stm32/
-│   ├── Core/                # HAL drivers (main, usart, tim, adc, gpio)
+│   ├── Core/                # HAL 驱动 (main, usart, tim, adc, gpio)
 │   ├── Drivers/             # CMSIS + STM32F1xx HAL
-│   ├── MiniBalance/CONTROL/ # PD controller + servo output
-│   ├── MiniBalance/show/    # OLED display
+│   ├── MiniBalance/CONTROL/ # PD 控制器 + 舵机输出
+│   ├── MiniBalance/show/    # OLED 显示
 │   ├── MiniBalance_HARDWARE/
-│   │   ├── OLED/            # SSD1306 128×64 driver
-│   │   └── LED/             # Status LED driver
-│   ├── SYSTEM/              # delay, sys (bit-band, type defs)
-│   └── MDK-ARM/             # Keil project + linker script
-├── build_gcc.sh             # GCC cross-compilation script
+│   │   ├── OLED/            # SSD1306 128×64 驱动
+│   │   └── LED/             # 状态 LED 驱动
+│   ├── SYSTEM/              # 延时, sys (位带, 类型定义)
+│   └── MDK-ARM/             # Keil 工程 + 链接脚本
+├── build_gcc.sh             # GCC 交叉编译脚本
 └── README.md
 ```
 
-## Build & Flash
+## 编译与烧录
 
 ### STM32 (GCC)
 
 ```bash
-# Requires: arm-none-eabi-gcc
+# 需要: arm-none-eabi-gcc
 ./build_gcc.sh
-# Output: stm32/build_gcc/output.elf
+# 输出: stm32/build_gcc/output.elf
 ```
 
 ### STM32 (Keil MDK)
 
-Open `stm32/MDK-ARM/MiniBalance.uvprojx`, build (F7), download (F8).
+打开 `stm32/MDK-ARM/MiniBalance.uvprojx`，编译 (F7)，下载 (F8)。
 
 ### OpenMV
 
-Copy `openmv/main.py` to the OpenMV flash root via OpenMV IDE.
+通过 OpenMV IDE 将 `openmv/main.py` 复制到 OpenMV 闪存根目录。
 
-## Configuration
+## 配置指南
 
-### Color Thresholds (openmv/main.py)
+### 颜色阈值 (openmv/main.py)
 
-Edit `COLOR_THRESHOLDS` in LAB format: `(L_min, L_max, A_min, A_max, B_min, B_max)`.
+编辑 `COLOR_THRESHOLDS`，LAB 格式: `(L_min, L_max, A_min, A_max, B_min, B_max)`。
 
 ```python
-# Use OpenMV IDE threshold editor to tune
+# 使用 OpenMV IDE 阈值编辑器进行调试
 COLOR_THRESHOLDS = [(0, 100, -128, -15, 0, 127)]
 ```
 
-### Camera orientation
+### 摄像头方向
 
-Set `SENSOR_HMIRROR` and `SENSOR_VFLIP` to match physical mounting.
+根据实际安装方向设置 `SENSOR_HMIRROR` 和 `SENSOR_VFLIP`。
 
-### PD Gains (stm32/MiniBalance/CONTROL/control.h)
+### PD 增益 (stm32/MiniBalance/CONTROL/control.h)
 
-Increase `YAW_KP` / `PITCH_KP` for faster response, enable `YAW_KD` / `PITCH_KD` for damping.
+增大 `YAW_KP` / `PITCH_KP` 可加快响应，启用 `YAW_KD` / `PITCH_KD` 可增加阻尼。
 
-### Servo PWM Limits (stm32/MiniBalance/CONTROL/control.h)
+### 舵机 PWM 限幅 (stm32/MiniBalance/CONTROL/control.h)
 
-Adjust `SERVO_BASE_MIN/MAX_PWM` and `SERVO_ARM_MIN/MAX_PWM` to match servo specs.
+根据舵机规格调整 `SERVO_BASE_MIN/MAX_PWM` 和 `SERVO_ARM_MIN/MAX_PWM`。
 
-## Debug
+## 调试
 
-Define `DEBUG_PRINTF` to enable serial debugging via USART1 (printf at 115200 baud):
+定义 `DEBUG_PRINTF` 以通过 USART1 启用串口调试 (printf, 115200 波特)：
 
 ```bash
-# In build_gcc.sh, add: -DDEBUG_PRINTF
+# 在 build_gcc.sh 中添加: -DDEBUG_PRINTF
 ```
 
-Prints target coordinates, normalized error, and target-lost status every 500 ms.
+每 500 ms 打印一次目标坐标、归一化误差和目标丢失状态。

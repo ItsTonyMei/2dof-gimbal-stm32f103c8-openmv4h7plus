@@ -9,7 +9,7 @@ extern "C" {
 
 void Error_Handler(void);
 
-// Pin definitions
+// 引脚定义
 #define LED_Pin GPIO_PIN_4
 #define LED_GPIO_Port GPIOA
 #define OLED_DC_Pin GPIO_PIN_15

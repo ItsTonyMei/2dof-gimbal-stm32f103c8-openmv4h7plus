@@ -1,32 +1,16 @@
 /***********************************************
-��˾����Ȥ�Ƽ�(��ݸ)���޹�˾
-Ʒ�ƣ�WHEELTEC
-������wheeltec.net
-�Ա����̣�shop114407458.taobao.com 
-����ͨ: https://minibalance.aliexpress.com/store/4455017
-�汾��V1.0
-�޸�ʱ�䣺2022-10-13
-
-Brand: WHEELTEC
-Website: wheeltec.net
-Taobao shop: shop114407458.taobao.com 
-Aliexpress: https://minibalance.aliexpress.com/store/4455017
-Version: V1.0
-Update��2022-10-13
-
-All rights reserved
-***********************************************/
+ * LED 驱动 (系统运行状态指示)
+ ***********************************************/
 #include "led.h"
 
-
 /**************************************************************************
-�������ܣ�LED��˸
-��ڲ�������˸Ƶ�� 
-����  ֵ����
+函数功能：LED 闪烁
+入口参数：time=闪烁频率 (0=关闭)
+返回  值：无
 **************************************************************************/
 void Led_Flash(u16 time)
 {
-	  static int temp;
-	  if(0==time) LED=0;
-	  else		if(++temp==time)	LED=~LED,temp=0;
+    static int temp;
+    if(0 == time) LED = 0;
+    else if(++temp == time) LED = ~LED, temp = 0;
 }

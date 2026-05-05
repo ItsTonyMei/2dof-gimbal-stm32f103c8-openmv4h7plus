@@ -2,9 +2,9 @@
 #define __CONTROL_H
 #include "sys.h"
 
-// OpenMV 5-byte protocol: [0xFF][0xFE][hasBlob][tx][ty]
-// hasBlob: 0x01=target detected, 0x00=lost
-// tx/ty: normalized 0-255, 128=center (QVGA 320x240 → center(160,120)→128)
+// OpenMV 5字节协议: [0xFF][0xFE][hasBlob][tx][ty]
+//   hasBlob: 0x01=检测到目标, 0x00=目标丢失
+//   tx/ty:   归一化坐标 0-255, 128=中心 (QVGA 320x240: 中心(160,120)→128)
 #define OPENMV_CENTER_X        128
 #define OPENMV_CENTER_Y        128
 #define OPENMV_STALE_TIMEOUT_MS 300U
@@ -16,13 +16,13 @@
 #define SERVO_ARM_MIN_PWM      300.0f
 #define SERVO_ARM_MAX_PWM      1200.0f
 
-// PD gains (normalized error → velocity)
+// PD 控制增益 (归一化误差 → 速度输出)
 #define YAW_KP     0.05f
 #define YAW_KD     0.0f
 #define PITCH_KP   0.05f
 #define PITCH_KD   0.0f
 
-// OpenMV status flags
+// OpenMV 状态标志
 extern u8 OpenMV_Target_Lost;
 extern u8 OpenMV_Data_Stale;
 extern u8 OpenMV_Armed;

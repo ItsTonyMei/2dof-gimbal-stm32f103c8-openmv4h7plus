@@ -1,5 +1,5 @@
 #!/bin/bash
-# GCC build for 2DOF Gimbal — STM32F103C8T6 (OpenMV tracking mode only)
+# GCC 交叉编译脚本 — 二自由度云台 STM32F103C8T6 (OpenMV 追踪模式)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -62,22 +62,22 @@ SRCS=(
     Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_uart.c
 )
 
-echo "=== Compiling ${#SRCS[@]} files for STM32F103C8T6 ==="
+echo "=== 编译 ${#SRCS[@]} 个文件 (STM32F103C8T6) ==="
 
 OBJS=""
 for src in "${SRCS[@]}"; do
     obj="$BUILD/$(basename "${src%.*}").o"
-    printf "  CC  %s\n" "${src##*/}"
+    printf "  编译 %s\n" "${src##*/}"
     arm-none-eabi-gcc $CFLAGS $DEFINES "${INC[@]}" -c "$PROJECT/$src" -o "$obj" 2>&1
     OBJS="$OBJS $obj"
 done
 
-echo "  AS  startup_stm32f103xb.s"
+echo "  汇编 startup_stm32f103xb.s"
 arm-none-eabi-gcc $CPU -c "$PROJECT/Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s" -o "$BUILD/startup.o" 2>&1
 
-echo "=== Linking ==="
+echo "=== 链接中 ==="
 arm-none-eabi-gcc $LDFLAGS $BUILD/startup.o $OBJS -o "$BUILD/output.elf" 2>&1
 
 echo ""
-echo "=== BUILD SUCCESS ==="
+echo "=== 编译成功 ==="
 arm-none-eabi-size "$BUILD/output.elf"

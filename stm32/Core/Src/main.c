@@ -6,8 +6,8 @@
 #include "sys.h"
 #include "control.h"
 
-// Debug: define DEBUG_PRINTF to enable serial printf output
-// (add -DDEBUG_PRINTF in build flags)
+// 调试开关: 编译时定义 DEBUG_PRINTF 以启用串口调试输出
+// (在 build_gcc.sh 中添加 -DDEBUG_PRINTF)
 
 u8 Flag_Show = 0;
 
@@ -56,7 +56,7 @@ int main(void)
             static uint32_t dbg_tick = 0;
             if(HAL_GetTick() - dbg_tick >= 500U) {
                 dbg_tick = HAL_GetTick();
-                printf("[DBG] tx=%d ty=%d ex=%.3f ey=%.3f T1=%.0f T2=%.0f lost=%d\r\n",
+                printf("[调试] tx=%d ty=%d ex=%.3f ey=%.3f T1=%.0f T2=%.0f lost=%d\r\n",
                     OpenMV_Rxbuf[1], OpenMV_Rxbuf[2],
                     (double)OpenMV_Error_X, (double)OpenMV_Error_Y,
                     (double)Target1, (double)Target2,

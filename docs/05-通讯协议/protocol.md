@@ -1,51 +1,51 @@
-# Communication Protocol — OpenMV → STM32
+# 通信协议 — OpenMV → STM32
 
-## Physical Layer
+## 物理层
 
-| Parameter | Value |
-|-----------|-------|
-| UART | USART3 |
-| Pins | OpenMV TX(P4) → STM32 PB11(RX), GND ↔ GND |
-| Baud rate | 115200 |
-| Data bits | 8 |
-| Stop bits | 1 |
-| Parity | None |
+| 参数 | 值 |
+|------|------|
+| 串口 | USART3 |
+| 引脚 | OpenMV TX(P4) → STM32 PB11(RX), GND ↔ GND |
+| 波特率 | 115200 |
+| 数据位 | 8 |
+| 停止位 | 1 |
+| 校验位 | 无 |
 
-## Frame Format (5 bytes)
+## 帧格式 (5 字节)
 
 ```
 [0xFF] [0xFE] [hasBlob] [tx] [ty]
 ```
 
-| Byte | Field | Range | Description |
-|------|-------|-------|-------------|
-| 0 | Header 1 | `0xFF` | Frame sync |
-| 1 | Header 2 | `0xFE` | Frame sync |
-| 2 | hasBlob | `0x00` or `0x01` | Target detection flag |
-| 3 | tx | 0–255 | Normalized X (128 = center) |
-| 4 | ty | 0–255 | Normalized Y (128 = center) |
+| 字节 | 字段 | 范围 | 说明 |
+|------|------|------|------|
+| 0 | 帧头 1 | `0xFF` | 帧同步 |
+| 1 | 帧头 2 | `0xFE` | 帧同步 |
+| 2 | hasBlob | `0x00` 或 `0x01` | 目标检测标志 |
+| 3 | tx | 0–255 | 归一化 X 坐标 (128=中心) |
+| 4 | ty | 0–255 | 归一化 Y 坐标 (128=中心) |
 
-No checksum. The 2-byte header provides resynchronization on data loss.
+无校验和。2 字节帧头在数据丢失时提供重同步能力。
 
-## Coordinate Mapping
+## 坐标映射
 
-QVGA 320×240 → normalized 0-255:
+QVGA 320×240 → 归一化 0-255:
 
 ```
 tx = round(cx / 320 × 255)
 ty = round(cy / 240 × 255)
 ```
 
-Image center (cx=160, cy=120) maps to (tx=128, ty=128).
+图像中心 (cx=160, cy=120) 映射到 (tx=128, ty=128)。
 
-## State Machine (STM32 receiver)
+## 状态机 (STM32 接收端)
 
-The USART3 RX interrupt implements a header-detection state machine:
+USART3 接收中断实现帧头检测状态机：
 
-1. Scan for `0xFF 0xFE` header sequence
-2. After header locked, collect 3 payload bytes
-3. Write `[hasBlob, tx, ty]` to `OpenMV_Rxbuf`
-4. Set `OpenMV_Usart_Compelet = 1`
-5. Control loop (100 Hz) consumes the buffer
+1. 扫描 `0xFF 0xFE` 帧头序列
+2. 帧头锁定后，收集 3 字节负载
+3. 将 `[hasBlob, tx, ty]` 写入 `OpenMV_Rxbuf`
+4. 设置 `OpenMV_Usart_Compelet = 1`
+5. 控制循环 (100 Hz) 消费缓冲区
 
-Frame boundaries are self-synchronizing: if payload bytes coincidentally form `0xFF 0xFE`, the state machine resyncs on the next valid header (1-frame glitch, probability ≈ 1/65536).
+帧边界自同步：如果负载字节恰好组成 `0xFF 0xFE`，状态机在下一个合法帧头重新同步（1 帧短暂异常，概率约 1/65536）。

@@ -1,6 +1,6 @@
 #include "usart.h"
 
-// ---- printf redirect to USART1 ----
+// ---- printf 重定向到 USART1 ----
 #ifdef __ARMCC_VERSION
   #if (__ARMCC_VERSION < 6000000)
   #pragma import(__use_no_semihosting)
@@ -35,7 +35,7 @@ volatile uint32_t OpenMV_Frame_Count = 0;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
-// ---- USART1 init (debug printf only) ----
+// ---- USART1 初始化 (仅用于调试 printf) ----
 void MX_USART1_UART_Init(void)
 {
     huart1.Instance = USART1;
@@ -51,7 +51,7 @@ void MX_USART1_UART_Init(void)
     HAL_UART_Receive_IT(&huart1, Usart1_Receive_buf, sizeof(Usart1_Receive_buf));
 }
 
-// ---- USART3 init (OpenMV protocol) ----
+// ---- USART3 初始化 (OpenMV 协议) ----
 void MX_USART3_UART_Init(void)
 {
     huart3.Instance = USART3;
@@ -67,7 +67,7 @@ void MX_USART3_UART_Init(void)
     HAL_UART_Receive_IT(&huart3, Usart3_Receive_buf, sizeof(Usart3_Receive_buf));
 }
 
-// ---- MSP Init ----
+// ---- MSP 初始化 ----
 void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -119,8 +119,8 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
     }
 }
 
-// ---- OpenMV 5-byte protocol frame parser (USART3 only) ----
-// Frame: [0xFF][0xFE][hasBlob][tx][ty]
+// ---- OpenMV 5字节协议帧解析 (仅 USART3) ----
+// 帧格式: [0xFF][0xFE][hasBlob][tx][ty]
 #define OMV_PAYLOAD_LEN 3U
 
 typedef struct {
@@ -178,7 +178,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
     else if(huart == &huart1)
     {
-        // USART1: no protocol parsing, just drain RX to prevent ORE
+        // USART1: 不做协议解析, 仅清空接收防止溢出
         HAL_UART_Receive_IT(&huart1, Usart1_Receive_buf, sizeof(Usart1_Receive_buf));
     }
 }

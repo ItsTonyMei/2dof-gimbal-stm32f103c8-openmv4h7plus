@@ -1,21 +1,6 @@
 /***********************************************
-公司：轮趣科技（东莞）有限公司
-品牌：WHEELTEC
-官网：wheeltec.net
-淘宝店铺：shop114407458.taobao.com 
-速卖通: https://minibalance.aliexpress.com/store/4455017
-版本：5.7
-修改时间：2021-04-29
-
-Brand: WHEELTEC
-Website: wheeltec.net
-Taobao shop: shop114407458.taobao.com 
-Aliexpress: https://minibalance.aliexpress.com/store/4455017
-Version:5.7
-Update：2021-04-29
-
-All rights reserved
-***********************************************/
+ * 延时函数 (SysTick 实现)
+ ***********************************************/
 
 #include "delay.h"
 
@@ -30,11 +15,8 @@ void delay_init(void)
 }
 
 /**************************************************************************
-Function: Delay function（us）
-Input   : nus：The number of us to delay
-Output  : none
-函数功能：延时函数（us）
-入口参数：nus：要延时的us数	
+函数功能：微秒延时
+入口参数：nus：要延时的微秒数
 返回  值：无
 **************************************************************************/			    								   
 void delay_us(u32 nus)
@@ -51,11 +33,8 @@ void delay_us(u32 nus)
 	SysTick->VAL =0X00;      					 				//清空计数器	 
 }
 /**************************************************************************
-Function: Delay function（ms）
-Input   : mus：The number of ms to delay
-Output  : none
-函数功能：延时函数（us）
-入口参数：mus：要延时的ms数	
+函数功能：毫秒延时
+入口参数：nms：要延时的毫秒数
 返回  值：无
 **************************************************************************/
 //注意nms的范围
