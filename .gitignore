@@ -1,3 +1,4 @@
 stm32/build_gcc/
 openmv/__pycache__/
 *.pyc
+.claude/
