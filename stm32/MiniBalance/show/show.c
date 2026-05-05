@@ -17,10 +17,14 @@ void oled_show(void)
     OLED_ShowNumber(52, 20, OpenMV_Rxbuf[2], 3, 12);
 
     extern float OpenMV_Error_X, OpenMV_Error_Y;
+    int ex_raw = (int)(OpenMV_Error_X * 100);
+    int ey_raw = (int)(OpenMV_Error_Y * 100);
     OLED_ShowString(0, 30, "EX:");
-    OLED_ShowNumber(20, 30, (int)(OpenMV_Error_X * 100), 6, 12);
+    if(ex_raw < 0) { OLED_ShowString(20, 30, "-"); OLED_ShowNumber(28, 30, -ex_raw, 5, 12); }
+    else          { OLED_ShowString(20, 30, "+"); OLED_ShowNumber(28, 30,  ex_raw, 5, 12); }
     OLED_ShowString(70, 30, "EY:");
-    OLED_ShowNumber(90, 30, (int)(OpenMV_Error_Y * 100), 6, 12);
+    if(ey_raw < 0) { OLED_ShowString(90, 30, "-"); OLED_ShowNumber(98, 30, -ey_raw, 5, 12); }
+    else          { OLED_ShowString(90, 30, "+"); OLED_ShowNumber(98, 30,  ey_raw, 5, 12); }
 
     OLED_ShowString(0, 42, "T1:");
     OLED_ShowNumber(20, 42, Target1, 6, 12);
