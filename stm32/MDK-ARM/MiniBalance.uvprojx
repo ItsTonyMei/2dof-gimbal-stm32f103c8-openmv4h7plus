@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F103xB</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F1xx/Include;../Drivers/CMSIS/Include;../MiniBalance/CONTROL;../MiniBalance/show;../MiniBalance_HARDWARE/ADC;../MiniBalance_HARDWARE/BEEP;../MiniBalance_HARDWARE/DataScope_DP;../MiniBalance_HARDWARE/KEY;../MiniBalance_HARDWARE/LED;../MiniBalance_HARDWARE/OLED;../MiniBalance_HARDWARE/TIMER;../MiniBalance_HARDWARE/USART2;../MiniBalance_HARDWARE/USART3;../MiniBalance_HARDWARE/MOTOR;../MiniBalance_HARDWARE/PS2;../SYSTEM/sys;../SYSTEM/delay
+              <IncludePath>../Core/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc;../Drivers/STM32F1xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F1xx/Include;../Drivers/CMSIS/Include;../MiniBalance/CONTROL;../MiniBalance/show;../MiniBalance_HARDWARE/LED;../MiniBalance_HARDWARE/OLED;../SYSTEM/sys;../SYSTEM/delay
 </IncludePath>
             </VariousControls>
           </Cads>
@@ -908,25 +908,13 @@
               <FilePath>..\MiniBalance_HARDWARE\OLED\oled.c</FilePath>
             </File>
             <File>
-              <FileName>key.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\MiniBalance_HARDWARE\KEY\key.c</FilePath>
-            </File>
             <File>
               <FileName>LED.C</FileName>
               <FileType>1</FileType>
               <FilePath>..\MiniBalance_HARDWARE\LED\LED.C</FilePath>
             </File>
             <File>
-              <FileName>BEEP.C</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\MiniBalance_HARDWARE\BEEP\BEEP.C</FilePath>
-            </File>
             <File>
-              <FileName>pstwo.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\MiniBalance_HARDWARE\PS2\pstwo.c</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>
@@ -938,10 +926,6 @@
               <FilePath>..\MiniBalance\show\show.c</FilePath>
             </File>
             <File>
-              <FileName>DataScope_DP.C</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\MiniBalance_HARDWARE\DataScope_DP\DataScope_DP.C</FilePath>
-            </File>
             <File>
               <FileName>control.c</FileName>
               <FileType>1</FileType>
