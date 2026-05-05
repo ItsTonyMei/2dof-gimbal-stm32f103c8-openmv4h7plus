@@ -29,6 +29,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         }
 
         Led_Flash(100);
+        IWDG->KR = 0xAAAA;
     }
 }
 
@@ -46,7 +47,7 @@ void Set_Pwm(float velocity1, float velocity2)
 
 u8 Turn_Off(int voltage)
 {
-    return (voltage < 1000) ? 1 : 0;
+    return (voltage < BATTERY_ADC_RAW_LOW) ? 1 : 0;
 }
 
 void Xianfu_Pwm(void)
@@ -158,28 +159,25 @@ void OpenMV_Control(void)
         float new_error_y = ((float)target_y - OPENMV_CENTER_Y) / 255.0f;
 
         // 软死区: 二次缓动过渡
-        #define INNER_DEADZONE  5
-        #define OUTER_DEADZONE  15
-
         int raw_dx = (int)(target_x - OPENMV_CENTER_X);
         int raw_dy = (int)(target_y - OPENMV_CENTER_Y);
         int abs_dx = raw_dx < 0 ? -raw_dx : raw_dx;
         int abs_dy = raw_dy < 0 ? -raw_dy : raw_dy;
 
         float scale_x = 1.0f;
-        if(abs_dx <= INNER_DEADZONE) {
+        if(abs_dx <= PD_INNER_DEADZONE) {
             scale_x = 0.0f;
-        } else if(abs_dx < OUTER_DEADZONE) {
-            scale_x = (float)(abs_dx - INNER_DEADZONE) / (float)(OUTER_DEADZONE - INNER_DEADZONE);
+        } else if(abs_dx < PD_OUTER_DEADZONE) {
+            scale_x = (float)(abs_dx - PD_INNER_DEADZONE) / (float)(PD_OUTER_DEADZONE - PD_INNER_DEADZONE);
             scale_x = scale_x * scale_x;
         }
         new_error_x = ((float)raw_dx) / 255.0f * scale_x;
 
         float scale_y = 1.0f;
-        if(abs_dy <= INNER_DEADZONE) {
+        if(abs_dy <= PD_INNER_DEADZONE) {
             scale_y = 0.0f;
-        } else if(abs_dy < OUTER_DEADZONE) {
-            scale_y = (float)(abs_dy - INNER_DEADZONE) / (float)(OUTER_DEADZONE - INNER_DEADZONE);
+        } else if(abs_dy < PD_OUTER_DEADZONE) {
+            scale_y = (float)(abs_dy - PD_INNER_DEADZONE) / (float)(PD_OUTER_DEADZONE - PD_INNER_DEADZONE);
             scale_y = scale_y * scale_y;
         }
         new_error_y = ((float)raw_dy) / 255.0f * scale_y;
@@ -188,7 +186,7 @@ void OpenMV_Control(void)
         OpenMV_Error_Y = new_error_y;
 
         // PD 控制 (默认为纯 P, KD=0)
-        float alpha = 0.1f;
+        float alpha = PD_EMA_ALPHA;
         float filtered_yaw   = alpha * ((new_error_x - last_error_x) / 0.1f) + (1.0f - alpha) * yaw_deriv;
         float filtered_pitch = alpha * ((new_error_y - last_error_y) / 0.1f) + (1.0f - alpha) * pitch_deriv;
         yaw_deriv = filtered_yaw;

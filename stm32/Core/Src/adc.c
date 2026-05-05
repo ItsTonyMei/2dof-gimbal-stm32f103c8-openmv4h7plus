@@ -121,21 +121,19 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 入口参数：ADC1 的通道
 返回  值：AD转换结果
 **************************************************************************/
-u16 Get_Adc(u8 ch)   
+u16 Get_Adc(u8 ch)
 {
-	u16 result;
-	ADC_ChannelConfTypeDef sConfig;//通道初始化
-	sConfig.Channel=ch;
-  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;		//采用周期239.5周期
+	u16 result = 0;
+	ADC_ChannelConfTypeDef sConfig;
+	sConfig.Channel = ch;
+	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
 	sConfig.Rank = 1;
-	HAL_ADC_ConfigChannel(&hadc1,&sConfig);		
-	
-	HAL_ADC_Start(&hadc1);								//启动转换
-	HAL_ADC_PollForConversion(&hadc1,30);				//等待转化结束
-	if(HAL_IS_BIT_SET(HAL_ADC_GetState(&hadc1), HAL_ADC_STATE_REG_EOC))
-	{
-		result=HAL_ADC_GetValue(&hadc1);	//返回最近一次ADC1规则组的转换结果
-	}
+	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+	HAL_ADC_Start(&hadc1);
+	if(HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+		result = HAL_ADC_GetValue(&hadc1);
+	HAL_ADC_Stop(&hadc1);
 	return result;
 }
 

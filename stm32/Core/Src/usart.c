@@ -31,6 +31,10 @@ int fputc(int ch, FILE *f)
 u8 Usart3_Receive_buf[1];
 u8 Usart1_Receive_buf[1];
 volatile uint32_t OpenMV_Frame_Count = 0;
+volatile uint32_t OpenMV_Error_ORE = 0;
+volatile uint32_t OpenMV_Error_FE  = 0;
+volatile uint32_t OpenMV_Error_NE  = 0;
+volatile uint32_t OpenMV_Error_PE  = 0;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
@@ -195,13 +199,23 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     }
     else if(huart == &huart3)
     {
-        if(huart->ErrorCode & (HAL_UART_ERROR_ORE | HAL_UART_ERROR_FE | HAL_UART_ERROR_NE | HAL_UART_ERROR_PE))
-        {
+        uint32_t err = huart->ErrorCode;
+        if(err & HAL_UART_ERROR_ORE) {
             __HAL_UART_CLEAR_OREFLAG(huart);
-            __HAL_UART_CLEAR_FEFLAG(huart);
-            __HAL_UART_CLEAR_NEFLAG(huart);
-            __HAL_UART_CLEAR_PEFLAG(huart);
-            HAL_UART_Receive_IT(&huart3, Usart3_Receive_buf, sizeof(Usart3_Receive_buf));
+            OpenMV_Error_ORE++;
         }
+        if(err & HAL_UART_ERROR_FE)  {
+            __HAL_UART_CLEAR_FEFLAG(huart);
+            OpenMV_Error_FE++;
+        }
+        if(err & HAL_UART_ERROR_NE)  {
+            __HAL_UART_CLEAR_NEFLAG(huart);
+            OpenMV_Error_NE++;
+        }
+        if(err & HAL_UART_ERROR_PE)  {
+            __HAL_UART_CLEAR_PEFLAG(huart);
+            OpenMV_Error_PE++;
+        }
+        HAL_UART_Receive_IT(&huart3, Usart3_Receive_buf, sizeof(Usart3_Receive_buf));
     }
 }

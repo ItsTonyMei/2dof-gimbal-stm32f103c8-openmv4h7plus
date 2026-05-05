@@ -39,6 +39,15 @@ int main(void)
 
     delay_init();
     OLED_Init();
+
+    // 独立看门狗: LSI 40kHz / 64 = 625 Hz, 重装载 62 → ~100ms 超时
+    // TIM2 回调每 10ms 喂狗, 连续 10 次中断丢失则复位
+    IWDG->KR = 0x5555;
+    IWDG->PR = 0x04;
+    IWDG->RLR = 62;
+    IWDG->KR = 0xCCCC;
+    IWDG->KR = 0xAAAA;
+
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
     HAL_TIM_Base_Start_IT(&htim2);
@@ -48,16 +57,22 @@ int main(void)
         oled_show();
 
         Voltage_All += Get_battery_volt();
-        if(++Voltage_Count == 100)
-            Voltage = Voltage_All / 100, Voltage_All = 0, Voltage_Count = 0;
+        if(++Voltage_Count == BATTERY_SAMPLE_COUNT)
+            Voltage = Voltage_All / BATTERY_SAMPLE_COUNT, Voltage_All = 0, Voltage_Count = 0;
 
 #ifdef DEBUG_PRINTF
         {
             static uint32_t dbg_tick = 0;
-            if(HAL_GetTick() - dbg_tick >= 500U) {
+            if(HAL_GetTick() - dbg_tick >= DEBUG_PRINTF_INTERVAL_MS) {
                 dbg_tick = HAL_GetTick();
+                uint8_t rx1, rx2;
+                uint32_t primask = __get_PRIMASK();
+                __disable_irq();
+                rx1 = OpenMV_Rxbuf[1];
+                rx2 = OpenMV_Rxbuf[2];
+                if(primask == 0U) __enable_irq();
                 printf("[调试] tx=%d ty=%d ex=%.3f ey=%.3f T1=%.0f T2=%.0f lost=%d\r\n",
-                    OpenMV_Rxbuf[1], OpenMV_Rxbuf[2],
+                    rx1, rx2,
                     (double)OpenMV_Error_X, (double)OpenMV_Error_Y,
                     (double)Target1, (double)Target2,
                     OpenMV_Target_Lost);
