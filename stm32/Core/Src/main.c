@@ -37,7 +37,6 @@ int main(void)
     MX_TIM2_Init();
     MX_USART3_UART_Init();
 
-    delay_init();
     OLED_Init();
 
     // 独立看门狗: LSI 40kHz / 64 = 625 Hz, 重装载 62 → ~100ms 超时
@@ -79,7 +78,7 @@ int main(void)
             }
         }
 #endif
-        delay_ms(5);
+        HAL_Delay(5);
     }
 }
 

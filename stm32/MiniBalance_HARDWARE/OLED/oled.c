@@ -3,8 +3,8 @@
  ***********************************************/
 #include "oled.h"
 #include "stdlib.h"
-#include "oledfont.h"  	 
-#include "delay.h"
+#include "oledfont.h"
+#include "stm32f1xx_hal.h"
 	   
 u8 OLED_GRAM[128][8];	 
 void OLED_Refresh_Gram(void)
@@ -167,7 +167,7 @@ void OLED_Init(void)
     __HAL_RCC_BACKUPRESET_RELEASE();
 	HAL_PWR_DisableBkUpAccess(); //禁止修改后备寄存器
 	OLED_RST_Clr();
-	delay_ms(100);
+	HAL_Delay(100);
 	OLED_RST_Set(); 
 					  
 	OLED_WR_Byte(0xAE,OLED_CMD); //关闭显示
