@@ -1,75 +1,148 @@
-# 2DOF-Gimbal (STM32F103C8T6 + OpenMV4 H7 Plus)
+# 2-DOF Gimbal — Color Tracking Platform
 
-二自由度颜色追踪云台固件 + 文档。
+Two-axis gimbal with **OpenMV4 H7 Plus** color blob tracking + **STM32F103C8T6** servo control.
 
-## 硬件
+## Hardware
 
-- **MCU**: STM32F103C8T6 (ARM Cortex-M3)
-- **视觉**: OpenMV4 H7 Plus
-- **舵机**: 270° 底舵 + 180° 摇臂（可配置）
-- **控制方式**: PS2 手柄 / UART / OpenMV 颜色追踪
+| Component | Model | Notes |
+|-----------|-------|-------|
+| MCU | STM32F103C8T6 | 72 MHz Cortex-M3, 64 KB Flash, 20 KB RAM |
+| Vision | OpenMV4 H7 Plus | QVGA 320×240, color tracking at 30-60 fps |
+| Base servo | 270° (TIM4 CH3, PB8) | PWM range 250-1250 |
+| Arm servo | 180° (TIM4 CH4, PB9) | PWM range 300-1200 |
+| UART to OpenMV | USART3 (PB11/PB10) | 115200 8N1 |
+| Debug UART | USART1 (PA9/PA10) | printf redirect, 115200 8N1 |
+| Display | SSD1306 OLED 128×64 | Software SPI (PB3/RST, PA15/DC, PB5/SCL, PB4/SDA) |
+| Battery sense | ADC1 IN1 (PA1) | Voltage divider, factor ~11 |
 
-## 目录结构
+## Wiring
 
 ```
-├── stm32/                  # STM32 Keil MDK 工程
-│   ├── MDK-ARM/            # Keil 工程文件 (.uvprojx)
-│   ├── Core/                # HAL 驱动源码
-│   ├── Drivers/             # CMSIS + STM32F1xx_HAL_Driver
-│   ├── MiniBalance/         # 业务逻辑 (CONTROL, show)
-│   └── MiniBalance_HARDWARE/ # 外设驱动 (MOTOR, OLED, KEY, USART...)
-├── openmv/
-│   └── main.py             # OpenMV4 H7 Plus 颜色追踪固件
-├── docs/                   # 项目文档
-│   ├── 01-硬件与接线/
-│   ├── 02-开发环境/
-│   ├── 03-快速开始/
-│   ├── 04-工程源码解析/
-│   ├── 05-通讯协议/
-│   ├── 06-ROS与Python例程/
-│   ├── 07-开发笔记/
-│   ├── 08-C06B-360舵机驱动例程/
-│   └── 09-OpenMV人形追踪/
+OpenMV4 H7 Plus          STM32F103C8T6
+  TX (Pin 4)   ────────> PB11 (USART3_RX)
+  GND          ────────> GND
+
+CH9102 USB-UART          STM32F103C8T6
+  RX           ────────> PA9  (USART1_TX)
+  TX           ────────> PA10 (USART1_RX)
+```
+
+## Protocol (5-byte, OpenMV → STM32 via USART3)
+
+```
+[0xFF] [0xFE] [hasBlob] [tx] [ty]
+```
+
+| Byte | Field | Description |
+|------|-------|-------------|
+| 0 | `0xFF` | Frame sync 1 |
+| 1 | `0xFE` | Frame sync 2 |
+| 2 | `hasBlob` | `0x01` = target detected, `0x00` = lost |
+| 3 | `tx` | Normalized X: 0-255, 128 = image center |
+| 4 | `ty` | Normalized Y: 0-255, 128 = image center |
+
+**Coordinate mapping** (QVGA 320×240): `tx = round(cx / 320 × 255)`, `ty = round(cy / 240 × 255)`
+
+**Target lost**: OpenMV sends `hasBlob=0x00` with center coordinates. STM32 holds current position via `OpenMV_Hold_Current_Position()`. If no valid frame for 300 ms, velocity zeroes out.
+
+There is **no checksum** — the 2-byte header provides self-synchronization on frame loss.
+
+## Control Architecture
+
+```
+OpenMV (30-60 fps)                  STM32 (TIM2 @ 100 Hz)
+  color blob detection                OpenMV_Control() PD controller
+  → normalize to 0-255                → normalized error (-0.5 ~ +0.5)
+  → send 5-byte frame via UART3       → soft deadzone (5 px inner, 15 px outer)
+                                      → P gain (KP=0.05) → velocity output
+                                      → velocity clamp (±10)
+                                      → Set_Pwm() integrates velocity → position
+                                      → TIM4 CCR3/CCR4 → servos
+```
+
+### PID Parameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `YAW_KP` / `PITCH_KP` | 0.05 | Proportional gain on normalized error |
+| `YAW_KD` / `PITCH_KD` | 0.0 | Derivative gain (disabled by default) |
+| `INNER_DEADZONE` | 5 px | Complete deadband around center |
+| `OUTER_DEADZONE` | 15 px | Quadratic easing transition zone |
+| `OPENMV_MAX_DELTA` | 10.0 | Max velocity per control cycle |
+| `OPENMV_STALE_TIMEOUT_MS` | 300 | Stale frame timeout |
+
+### Servo Limits
+
+| Servo | Min PWM | Max PWM | Angle |
+|-------|---------|---------|-------|
+| Base (PB8) | 250 | 1250 | 270° |
+| Arm (PB9) | 300 | 1200 | 180° |
+
+## Directory Structure
+
+```
+├── openmv/main.py          # OpenMV color tracking firmware
+├── stm32/
+│   ├── Core/                # HAL drivers (main, usart, tim, adc, gpio)
+│   ├── Drivers/             # CMSIS + STM32F1xx HAL
+│   ├── MiniBalance/CONTROL/ # PD controller + servo output
+│   ├── MiniBalance/show/    # OLED display
+│   ├── MiniBalance_HARDWARE/
+│   │   ├── OLED/            # SSD1306 128×64 driver
+│   │   └── LED/             # Status LED driver
+│   ├── SYSTEM/              # delay, sys (bit-band, type defs)
+│   └── MDK-ARM/             # Keil project + linker script
+├── build_gcc.sh             # GCC cross-compilation script
 └── README.md
 ```
 
-## OpenMV 协议（5字节）
+## Build & Flash
 
+### STM32 (GCC)
+
+```bash
+# Requires: arm-none-eabi-gcc
+./build_gcc.sh
+# Output: stm32/build_gcc/output.elf
 ```
-[0xFF][0xFE][hasBlob][tx][ty]
+
+### STM32 (Keil MDK)
+
+Open `stm32/MDK-ARM/MiniBalance.uvprojx`, build (F7), download (F8).
+
+### OpenMV
+
+Copy `openmv/main.py` to the OpenMV flash root via OpenMV IDE.
+
+## Configuration
+
+### Color Thresholds (openmv/main.py)
+
+Edit `COLOR_THRESHOLDS` in LAB format: `(L_min, L_max, A_min, A_max, B_min, B_max)`.
+
+```python
+# Use OpenMV IDE threshold editor to tune
+COLOR_THRESHOLDS = [(0, 100, -128, -15, 0, 127)]
 ```
 
-| 字段 | 说明 |
-|---|---|
-| `hasBlob` | `0x01`=检测到目标，`0x00`=未检测 |
-| `tx/ty` | 归一化坐标 0-255，128=画面中心 |
-| 波特率 | 115200 8N1 |
+### Camera orientation
 
-## 快速开始
+Set `SENSOR_HMIRROR` and `SENSOR_VFLIP` to match physical mounting.
 
-### STM32 固件
+### PD Gains (stm32/MiniBalance/CONTROL/control.h)
 
-1. 用 Keil MDK 打开 `stm32/MDK-ARM/MiniBalance.uvprojx`
-2. 编译（F7）
-3. 下载（F8）
-4. 按 KEY_S 切换到 Mode 2（OpenMV 模式）
+Increase `YAW_KP` / `PITCH_KP` for faster response, enable `YAW_KD` / `PITCH_KD` for damping.
 
-### OpenMV 固件
+### Servo PWM Limits (stm32/MiniBalance/CONTROL/control.h)
 
-1. 将 `openmv/main.py` 放入 OpenMV 盘符根目录
-2. 重启 OpenMV，自动运行颜色追踪
+Adjust `SERVO_BASE_MIN/MAX_PWM` and `SERVO_ARM_MIN/MAX_PWM` to match servo specs.
 
-## 控制参数（STM32）
+## Debug
 
-| 参数 | 值 |
-|---|---|
-| YAW_KP / PITCH_KP | 0.05 |
-| INNER_DEADZONE | ±5px |
-| OUTER_DEADZONE | 5-15px（scale² 缓动） |
+Define `DEBUG_PRINTF` to enable serial debugging via USART1 (printf at 115200 baud):
 
-详见 [docs/09-OpenMV人形追踪/openmv-tracking.md](docs/09-OpenMV人形追踪/openmv-tracking.md)。
+```bash
+# In build_gcc.sh, add: -DDEBUG_PRINTF
+```
 
-## 编译依赖
-
-- **Keil MDK** 5.41+（需自行安装 ARM Compiler 6 和 STM32F1xx Device Pack）
-- **OpenMV IDE** 8.0+（用于 OpenMV 固件烧录）
+Prints target coordinates, normalized error, and target-lost status every 500 ms.

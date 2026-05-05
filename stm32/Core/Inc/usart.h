@@ -1,23 +1,3 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file    usart.h
-  * @brief   This file contains all the function prototypes for
-  *          the usart.c file
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2024 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-/* Define to prevent recursive inclusion -------------------------------------*/
 #ifndef __USART_H__
 #define __USART_H__
 
@@ -25,34 +5,19 @@
 extern "C" {
 #endif
 
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
-/* USER CODE BEGIN Includes */
 #include "sys.h"
-#include "stdio.h"	
-/* USER CODE END Includes */
+#include "stdio.h"
 
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart3;
-
-/* USER CODE BEGIN Private defines */
-
-/* USER CODE END Private defines */
+extern volatile uint32_t OpenMV_Frame_Count;
 
 void MX_USART1_UART_Init(void);
 void MX_USART3_UART_Init(void);
-
-/* USER CODE BEGIN Prototypes */
-void usart1_send(u8 data);
-void usart1_sendAngleBlock(int Angle_A, int Angle_B);
-void usart3_send(u8 data);
-void usart3_sendAngleBlock(int Angle_A, int Angle_B);
-/* USER CODE END Prototypes */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __USART_H__ */
-
+#endif
