@@ -7,3 +7,16 @@ openmv/__pycache__/
 tools/FlyMcu/FlyMcuConfig.ini
 tools/FlyMcu/ProgramLogs.txt
 stm32/MDK-ARM/*.uvguix.*
+
+# Keil MDK / csolution build artifacts & IDE config
+stm32/MDK-ARM/.clangd
+stm32/MDK-ARM/.cmsis/
+stm32/MDK-ARM/.vscode/
+stm32/MDK-ARM/*.yml
+stm32/MDK-ARM/*.sct
+stm32/MDK-ARM/build/
+stm32/MDK-ARM/out/
+stm32/MDK-ARM/tmp/
+stm32/MDK-ARM/*.log
+stm32/MDK-ARM/vcpkg-configuration.json
+stm32/MDK-ARM/RTE/
