@@ -2,6 +2,8 @@ stm32/build_gcc/
 stm32/OBJ/
 openmv/__pycache__/
 *.pyc
+*.tflite
+yolov8n_*.txt
 .claude/
 .remember/
 tools/FlyMcu/FlyMcuConfig.ini
