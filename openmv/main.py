@@ -6,8 +6,7 @@
 # 1. OpenMV IDE → 连接 N6
 # 2. 工具 → ROM文件系统 → 在OpenMV Cam上编辑romfs
 # 3. 浏览模型库 → STMicroelectronics → Object Detection → YOLOv8
-#    推荐: yolov8n_320.tflite  (平衡, ~20fps)
-#    备选: yolov8n_256.tflite  (高速, ~30fps)
+#    选择下面 PRESET 对应的 .tflite 文件
 # 4. 勾选 → 提交烧录（IDE 会自动调用 ST Edge AI Core 编译）
 # 5. 确认 /rom/ 下存在该 .tflite 文件
 
@@ -16,21 +15,42 @@ from pyb import UART, LED
 from ml.postprocessing.ultralytics import YoloV8
 
 # ============================================================
-# 配置参数
+# 配置参数 — 三选一预设（取消注释要用的那组，注释掉其余）
 # ============================================================
 
-# --- 模型 ---
-# 模型文件名（需与 ROMFS 中实际文件名一致）
-MODEL_PATH = "/rom/yolov8n_320.tflite"
-MODEL_THRESHOLD = 0.4        # 置信度阈值 (0.0~1.0)
 MODEL_NMS_THRESHOLD = 0.1    # NMS 阈值
 
+# -------- 预设 A: 画质优, ~20-23 fps --------
+MODEL_PATH = "/rom/yolov8n_320.tflite"
+CAMERA_WINDOW_W = 320
+CAMERA_WINDOW_H = 320
+MODEL_THRESHOLD = 0.4
+MIN_AREA = 500
+
+# -------- 预设 B: 均衡, ~28-33 fps --------
+# MODEL_PATH = "/rom/yolov8n_256.tflite"
+# CAMERA_WINDOW_W = 256
+# CAMERA_WINDOW_H = 256
+# MODEL_THRESHOLD = 0.55
+# MIN_AREA = 300
+
+# -------- 预设 C: 高速, ~40-48 fps --------
+# MODEL_PATH = "/rom/yolov8n_192.tflite"
+# CAMERA_WINDOW_W = 192
+# CAMERA_WINDOW_H = 192
+# MODEL_THRESHOLD = 0.6       # 192 分辨率最低，阈值需更高
+# MIN_AREA = 200              # 最小检测面积 (px²)
+
 # --- 摄像头 ---
-CAMERA_WINDOW_W = 320        # 处理窗口宽（应匹配模型输入尺寸）
-CAMERA_WINDOW_H = 320        # 处理窗口高
 CAMERA_HMIRROR = True        # 水平镜像（倒装安装）
 CAMERA_VFLIP   = True        # 垂直翻转（倒装安装）
 EXPOSURE_US    = 20000       # 固定曝光 (us), 室外可降低
+
+# --- 平滑 ---
+EMA_ALPHA = 0.3              # EMA 平滑系数 (0~1), 越小越平滑
+
+# --- 上半身追踪 ---
+BODY_CY_RATIO = 0.28         # 上半身中心在人体 bbox 顶部往下 % 处
 
 # --- UART ---
 UART_BAUDRATE = 115200
@@ -51,6 +71,9 @@ model = None
 uart = None
 frame_count = 0
 detect_count = 0
+smooth_cx = 0
+smooth_cy = 0
+smooth_ready = False
 
 # ============================================================
 # 初始化
@@ -104,41 +127,38 @@ def init_uart():
 # ============================================================
 
 def detect_person(img):
-    """YOLOv8 推理, 返回 (cx, cy, has_person)
-    COCO 80 类中 'person' 索引为 0, boxes[0] 为人形检测结果。
-    若模型仅含 person 单类, boxes 长度 = 1, 同样取 boxes[0]。
+    """YOLOv8 推理 + 上半身位置估算, 返回 (body_cx, body_cy, has_person)
+    从人体 bbox 顶部按 BODY_CY_RATIO 估算上半身中心。
     """
     global frame_count, detect_count
     frame_count += 1
 
-    boxes = model.predict([img])
+    try:
+        boxes = model.predict([img])
+    except Exception:
+        return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
+
+    if not boxes or not boxes[0]:
+        return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
     person_detections = boxes[0]
 
-    if person_detections:
-        # 兼容两种 detect 格式:
-        #   嵌套: ((x, y, w, h), score)
-        #   平铺: (x, y, w, h, score)
-        def _area(d):
-            if isinstance(d[0], (tuple, list)):
-                return d[0][2] * d[0][3]
-            return d[2] * d[3]
+    largest = max(person_detections, key=lambda d: d[0][2] * d[0][3])
+    rect, score = largest
+    x, y, w, h = rect
+    area = w * h
 
-        def _unpack(d):
-            if isinstance(d[0], (tuple, list)):
-                return (*d[0], d[1])
-            return d
+    if area < MIN_AREA:
+        return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
-        largest = max(person_detections, key=_area)
-        x, y, w, h, score = _unpack(largest)
-        cx = int(x + w // 2)
-        cy = int(y + h // 2)
+    body_cx = x + w // 2
+    body_cy = y + int(h * BODY_CY_RATIO)
 
-        img.draw_rectangle((x, y, w, h), color=(0, 255, 0))
-        img.draw_cross(cx, cy, color=(0, 255, 0))
-        detect_count += 1
-        return cx, cy, True
-
-    return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
+    img.draw_rectangle((x, y, w, h), color=(0, 255, 0), thickness=2)
+    br = max(8, w // 6)
+    img.draw_rectangle((body_cx - br, body_cy - br, br * 2, br * 2),
+                       color=(255, 0, 0), thickness=2)
+    detect_count += 1
+    return body_cx, body_cy, True
 
 def send_position(cx, cy, has_target):
     """发送 5 字节追踪数据帧到 STM32"""
@@ -207,7 +227,19 @@ if __name__ == "__main__":
         img = cam.snapshot()
 
         cx, cy, has_person = detect_person(img)
-        send_position(cx, cy, has_person)
+
+        if has_person:
+            if not smooth_ready:
+                smooth_cx, smooth_cy = cx, cy
+                smooth_ready = True
+            else:
+                smooth_cx = smooth_cx * (1 - EMA_ALPHA) + cx * EMA_ALPHA
+                smooth_cy = smooth_cy * (1 - EMA_ALPHA) + cy * EMA_ALPHA
+            send_position(int(smooth_cx), int(smooth_cy), True)
+        else:
+            smooth_ready = False
+            send_position(cx, cy, False)
+
         set_led_status(2 if has_person else 3)  # 绿: 检测到 / 蓝: 未检测到
 
         # 每 5 秒输出统计
