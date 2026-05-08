@@ -116,13 +116,13 @@ def detect_person(img):
 
     if person_detections:
         # 选面积最大的检测框（最近/最主要的目标）
-        largest = max(person_detections, key=lambda d: d[0][2] * d[0][3])
-        rect, score = largest
-        x, y, w, h = rect
+        # detect 格式: (x, y, w, h, score) 平铺 5 元组
+        largest = max(person_detections, key=lambda d: d[2] * d[3])
+        x, y, w, h, score = largest
         cx = int(x + w // 2)
         cy = int(y + h // 2)
 
-        img.draw_rectangle(rect, color=(0, 255, 0))
+        img.draw_rectangle((x, y, w, h), color=(0, 255, 0))
         img.draw_cross(cx, cy, color=(0, 255, 0))
         detect_count += 1
         return cx, cy, True
