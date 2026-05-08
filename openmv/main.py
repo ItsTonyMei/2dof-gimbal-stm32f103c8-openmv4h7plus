@@ -115,10 +115,21 @@ def detect_person(img):
     person_detections = boxes[0]
 
     if person_detections:
-        # 选面积最大的检测框（最近/最主要的目标）
-        # detect 格式: (x, y, w, h, score) 平铺 5 元组
-        largest = max(person_detections, key=lambda d: d[2] * d[3])
-        x, y, w, h, score = largest
+        # 兼容两种 detect 格式:
+        #   嵌套: ((x, y, w, h), score)
+        #   平铺: (x, y, w, h, score)
+        def _area(d):
+            if isinstance(d[0], (tuple, list)):
+                return d[0][2] * d[0][3]
+            return d[2] * d[3]
+
+        def _unpack(d):
+            if isinstance(d[0], (tuple, list)):
+                return (*d[0], d[1])
+            return d
+
+        largest = max(person_detections, key=_area)
+        x, y, w, h, score = _unpack(largest)
         cx = int(x + w // 2)
         cy = int(y + h // 2)
 
