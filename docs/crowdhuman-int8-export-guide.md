@@ -1,6 +1,9 @@
-# CrowdHuman YOLOv8 → STM32N6 NPU 真 int8 量化导出指南
+# CrowdHuman YOLOv11n → STM32N6 NPU 真 int8 量化导出指南
 
 ## 背景
+
+模型: YOLOv11n, CrowdHuman head+person 双类, 320×320, int8 量化。
+后处理兼容 `ml.postprocessing.ultralytics.YoloV8`（YOLOv11 输出格式与 YOLOv8 一致）。
 
 当前 `crowdhuman_head_person_int8.tflite` 文件**名**为 int8，实际是 float32 模型。ST Edge AI Core 编译结果为 pseudoint8，NPU 无法使用。
 
@@ -18,7 +21,7 @@ epochs       :   337 total / 44 NPU / 274 SW    ← 仅 13% 跑在 NPU 上
 
 TFLite 文件内部：输入输出层标为 `uint8`，但中间所有 Conv、Sigmoid、Mul 算子全是 float32 — 这是 **hybrid quantization（混合量化）**，NPU 无法加速。
 
-### 对比：正常工作的 `yolov8n_320.tflite`
+### 对比：正常工作的 int8 量化模型
 
 真正全 int8 量化的模型，ST 编译器会识别为 int8，几乎所有算子都跑在 NPU 上。
 
@@ -26,14 +29,14 @@ TFLite 文件内部：输入输出层标为 `uint8`，但中间所有 Conv、Sig
 
 ## 导出步骤
 
-项目定位：OpenMV N6 云台，YOLOv8n，CrowdHuman 数据集，head + person 双类，320×320 输入。
+项目定位：OpenMV N6 云台，YOLOv11n，CrowdHuman 数据集，head + person 双类，320×320 输入。
 
 ### 前提条件
 
 在训练机上需要：
 - 训练好的 `.pt` 权重文件
 - CrowdHuman 数据集的 `dataset.yaml`（用于量化校准）
-- `ultralytics >= 8.0.0`（YOLOv8 导出）
+- `ultralytics >= 8.0.0`（YOLOv11n 导出，ultralytics 8.x 支持 v11）
 
 ### 步骤 1：准备量化校准数据
 
@@ -121,5 +124,5 @@ openmv/crowdhuman_head_person_int8.txt     # 内容: head\nperson
 
 - 目标 NPU：STM32N6 Neural-ART (ST Edge AI Core v3.0.0)
 - OpenMV N6 firmware：最新版
-- 后处理：`ml.postprocessing.ultralytics.YoloV8`
-- 模型结构：YOLOv8n, 320×320×3 输入, [1,6,2100] 输出 (2 类)
+- 后处理：`ml.postprocessing.ultralytics.YoloV8`（兼容 YOLOv11n 输出格式）
+- 模型结构：YOLOv11n, 320×320×3 输入, [1,6,2100] 输出 (2 类)

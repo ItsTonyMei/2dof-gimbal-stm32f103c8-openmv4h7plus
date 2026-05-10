@@ -1,9 +1,10 @@
 # OpenMV N6 — CrowdHuman head+person 双类追踪固件（二自由度云台）
 # 通过 UART3 发送目标位置到 STM32F103C8T6（5 字节协议）。
+# 模型: YOLOv11n, 后处理器兼容 YoloV8
 
 import csi, image, time, ml
 from pyb import UART, LED
-from ml.postprocessing.ultralytics import YoloV8
+from ml.postprocessing.ultralytics import YoloV8  # YOLOv11 输出格式兼容 YoloV8 后处理
 
 # ============================================================
 # 配置参数
@@ -13,7 +14,7 @@ MODEL_NMS_THRESHOLD = 0.1    # NMS 阈值
 MODEL_PATH = "/rom/crowdhuman_head_person_int8.tflite"
 CAMERA_WINDOW_W = 320
 CAMERA_WINDOW_H = 320
-MODEL_THRESHOLD = 0.4        # YoloV8 NMS 置信度
+MODEL_THRESHOLD = 0.4        # YOLOv11n NMS 置信度 (兼容 YoloV8 后处理)
 
 # --- 摄像头 ---
 CAMERA_HMIRROR = True        # 水平镜像（倒装安装）
@@ -21,7 +22,8 @@ CAMERA_VFLIP   = True        # 垂直翻转（倒装安装）
 EXPOSURE_US    = 20000       # 固定曝光 (us), 室外可降低
 
 # --- 平滑 ---
-EMA_ALPHA = 0.2              # EMA 平滑系数 (0~1), 越小越平滑, 0.2 抑制抖动
+EMA_ALPHA = 0.2              # 目标点 EMA 平滑系数 (0~1), 越小越平滑
+BBOX_EMA_ALPHA = 0.25        # 检测框 EMA 平滑系数, 低于 0.3 时抖动抑制明显
 
 # --- 每类阈值与最小面积 ---
 HEAD_THRESHOLD   = 0.20     # head 置信度阈值（近距大头置信度偏低，需更低阈值）
@@ -76,6 +78,10 @@ lock_last_s = 0.0
 stat_head = 0
 stat_person = 0
 
+# 检测框 EMA 平滑 (按角色分别追踪, 减少视觉抖动)
+smooth_person_box = None  # (x, y, w, h) or None
+smooth_head_box = None
+
 # ============================================================
 # 初始化
 # ============================================================
@@ -100,7 +106,7 @@ def init_model():
     try:
         model = ml.Model(
             MODEL_PATH,
-            postprocess=YoloV8(
+            postprocess=YoloV8(  # YOLOv11n 输出兼容 YoloV8 后处理
                 threshold=MODEL_THRESHOLD,
                 nms_threshold=MODEL_NMS_THRESHOLD,
             ),
@@ -128,7 +134,7 @@ def init_uart():
 # ============================================================
 
 def _unpack(d):
-    """解包 YOLOv8 检测结果, 兼容嵌套/扁平/有无 class_id 共 4 种格式。
+    """解包 YOLOv11n 检测结果, 兼容嵌套/扁平/有无 class_id 共 4 种格式。
     返回 (x, y, w, h, score, class_id)。缺少 class_id 时默认为 0。
     """
     if isinstance(d[0], (list, tuple)):
@@ -169,13 +175,24 @@ def _match_head_to_person(heads, px, py, pw, ph):
     return best
 
 
+def _ema_bbox(prev, curr, alpha):
+    """对 bbox 四元组做 EMA 平滑, prev 为 None 时返回当前值"""
+    if prev is None:
+        return float(curr[0]), float(curr[1]), float(curr[2]), float(curr[3])
+    return (prev[0] * (1 - alpha) + curr[0] * alpha,
+            prev[1] * (1 - alpha) + curr[1] * alpha,
+            prev[2] * (1 - alpha) + curr[2] * alpha,
+            prev[3] * (1 - alpha) + curr[3] * alpha)
+
+
 def detect_person(img):
-    """YOLOv8 推理 + 目标锁定防抖。
+    """YOLOv11n 推理 + 目标锁定防抖。
     both 模式: person 框 + 配对 head 框同时绘制, 目标点 = head 中心。
     返回 (target_cx, target_cy, has_target)
     """
     global frame_count, detect_count, stat_head, stat_person
     global locked_cx, locked_cy, locked, lock_last_s
+    global smooth_person_box, smooth_head_box
     frame_count += 1
     now_s = time.time()
 
@@ -184,12 +201,16 @@ def detect_person(img):
     except Exception:
         if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
             return locked_cx, locked_cy, True
+        smooth_person_box = None
+        smooth_head_box = None
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
     if not boxes or not boxes[0]:
         if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
             return locked_cx, locked_cy, True
         locked = False
+        smooth_person_box = None
+        smooth_head_box = None
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
     # 合并所有类别的检测
@@ -266,6 +287,8 @@ def detect_person(img):
         if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
             return locked_cx, locked_cy, True
         locked = False
+        smooth_person_box = None
+        smooth_head_box = None
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
     # ---- 锁定匹配：优先选离上一帧目标最近的候选 ----
@@ -288,12 +311,36 @@ def detect_person(img):
     locked = True
     lock_last_s = now_s
 
-    # 绘制所有相关框 + 瞄准十字
+    # 绘制平滑后的检测框 + 瞄准十字
+    display_draws = []
+    smooth_head_center = None
+    smooth_person_upper = None
     for rx, ry, rw, rh, rcolor in draws:
+        if rcolor == (0, 255, 0):      # person 框
+            sx, sy, sw, sh = _ema_bbox(smooth_person_box, (rx, ry, rw, rh), BBOX_EMA_ALPHA)
+            smooth_person_box = (sx, sy, sw, sh)
+            smooth_person_upper = (int(sx + sw / 2), int(sy + sh * BODY_CY_RATIO))
+        elif rcolor == (255, 255, 0):  # head 框
+            sx, sy, sw, sh = _ema_bbox(smooth_head_box, (rx, ry, rw, rh), BBOX_EMA_ALPHA)
+            smooth_head_box = (sx, sy, sw, sh)
+            smooth_head_center = (int(sx + sw / 2), int(sy + sh / 2))
+        else:
+            sx, sy, sw, sh = float(rx), float(ry), float(rw), float(rh)
+        display_draws.append((int(sx), int(sy), int(sw), int(sh), rcolor))
+
+    for rx, ry, rw, rh, rcolor in display_draws:
         img.draw_rectangle((rx, ry, rw, rh), color=rcolor, thickness=2)
-    br = max(8, min(draws[0][2], draws[0][3]) // 6)
-    img.draw_rectangle((target_cx - br, target_cy - br, br * 2, br * 2),
-                       color=(255, 0, 0), thickness=2)
+
+    # 十字从平滑框推算 (优先 head, 否则 person 上半身)
+    if smooth_head_center is not None:
+        cross_cx, cross_cy = smooth_head_center
+    elif smooth_person_upper is not None:
+        cross_cx, cross_cy = smooth_person_upper
+    else:
+        cross_cx, cross_cy = target_cx, target_cy
+
+    br = max(8, min(display_draws[0][2], display_draws[0][3]) // 6)
+    img.draw_cross((cross_cx, cross_cy), size=br, color=(255, 0, 0), thickness=2)
     detect_count += 1
     return target_cx, target_cy, True
 
@@ -326,7 +373,7 @@ def set_led_status(status):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("OpenMV N6 — YOLOv8 CrowdHuman 双类追踪固件 v6.0")
+    print("OpenMV N6 — YOLOv11n CrowdHuman 双类追踪固件 v6.1")
     print("=" * 50)
 
     set_led_status(1)         # 红: 启动中
