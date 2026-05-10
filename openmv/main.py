@@ -1,45 +1,19 @@
-# OpenMV N6 — YOLOv8 人形检测追踪固件（二自由度云台）
+# OpenMV N6 — CrowdHuman head+person 双类追踪固件（二自由度云台）
 # 通过 UART3 发送目标位置到 STM32F103C8T6（5 字节协议）。
-# YOLOv8n NPU 加速, CrowdHuman 数据集, 检测 "head" + "person" 双类。
-#
-# ==== 模型烧录步骤 ====
-# 1. OpenMV IDE → 连接 N6
-# 2. 工具 → ROM文件系统 → 在OpenMV Cam上编辑romfs
-# 3. 浏览模型库 → STMicroelectronics → Object Detection → YOLOv8
-#    选择下面 PRESET 对应的 .tflite 文件
-# 4. 勾选 → 提交烧录（IDE 会自动调用 ST Edge AI Core 编译）
-# 5. 确认 /rom/ 下存在该 .tflite 文件
 
 import csi, image, time, ml
 from pyb import UART, LED
 from ml.postprocessing.ultralytics import YoloV8
 
 # ============================================================
-# 配置参数 — 三选一预设（取消注释要用的那组，注释掉其余）
+# 配置参数
 # ============================================================
 
 MODEL_NMS_THRESHOLD = 0.1    # NMS 阈值
-
-# -------- 预设 A: 画质优, ~20-23 fps --------
 MODEL_PATH = "/rom/crowdhuman_head_person_int8.tflite"
 CAMERA_WINDOW_W = 320
 CAMERA_WINDOW_H = 320
-MODEL_THRESHOLD = 0.4
-MIN_AREA = 500
-
-# -------- 预设 B: 均衡, ~28-33 fps --------
-# MODEL_PATH = "/rom/yolov8n_256.tflite"
-# CAMERA_WINDOW_W = 256
-# CAMERA_WINDOW_H = 256
-# MODEL_THRESHOLD = 0.55
-# MIN_AREA = 300
-
-# -------- 预设 C: 高速, ~40-48 fps --------
-# MODEL_PATH = "/rom/yolov8n_192.tflite"
-# CAMERA_WINDOW_W = 192
-# CAMERA_WINDOW_H = 192
-# MODEL_THRESHOLD = 0.6       # 192 分辨率最低，阈值需更高
-# MIN_AREA = 200              # 最小检测面积 (px²)
+MODEL_THRESHOLD = 0.4        # YoloV8 NMS 置信度
 
 # --- 摄像头 ---
 CAMERA_HMIRROR = True        # 水平镜像（倒装安装）
@@ -51,21 +25,20 @@ EMA_ALPHA = 0.2              # EMA 平滑系数 (0~1), 越小越平滑, 0.2 抑�
 
 # --- 每类阈值与最小面积 ---
 HEAD_THRESHOLD   = 0.20     # head 置信度阈值（近距大头置信度偏低，需更低阈值）
-PERSON_THRESHOLD = 0.40     # person 置信度阈值（当前模型未训练 person，保留备用）
+PERSON_THRESHOLD = 0.35     # person 置信度阈值
 HEAD_MIN_AREA    = 50       # head 最小面积 (px²), 远处小人头 ~50-100
 HEAD_MAX_AREA    = 30000    # head 最大面积 (px²), 超出视为误检（近距大头也到不了这值）
-PERSON_MIN_AREA  = 1000     # person 最小面积 (px²), 备用
+PERSON_MIN_AREA  = 1000     # person 最小面积 (px²)
 
 # --- 目标锁定 (tracking stability) ---
 LOCK_DIST_PX    = 40        # 锁定距离 (px), 上一帧目标中心附近优先匹配
 LOCK_TIMEOUT_S  = 1.0       # 锁定超时 (秒), 容忍短暂丢失, 避免抖动
 
 # --- 追踪策略 ---
-TRACK_MODE = "head"           # "head" / "person" / "both"
-#   当前模型只输出 head, 故切换到 head 模式
+TRACK_MODE = "both"           # "head" / "person" / "both"
 #   "head":   仅追踪头部, 目标点 = bbox 中心
 #   "person": 仅追踪人体, 目标点 = 上半身估算
-#   "both":   追踪两者中面积最大的, 按类别决定目标点
+#   "both":   person+head 配对: 有 person 时优先匹配其 head, 目标=头中心; 无双框同显
 
 # --- 上半身追踪 (TRACK_MODE = "person" 或 "both" 时生效) ---
 BODY_CY_RATIO = 0.28         # 上半身中心在人体 bbox 顶部往下 % 处
@@ -96,8 +69,7 @@ smooth_ready = False
 # 目标锁定
 locked_cx = 0
 locked_cy = 0
-locked_cls = -1
-locked_score = 0.0
+locked = False
 lock_last_s = 0.0
 
 # 类别统计 (每 5 秒周期)
@@ -172,99 +144,154 @@ def _unpack(d):
     return x, y, w, h, score, cls
 
 
+def _head_inside_person(hx, hy, hw, hh, px, py, pw, ph):
+    """head 中心在 person 上半区域内 (top 50%) 且至少部分重叠"""
+    hcx = hx + hw // 2
+    hcy = hy + hh // 2
+    if not (px <= hcx <= px + pw and py <= hcy <= py + ph):
+        return False
+    # head 中心在 person 上半部分 (top 50%)
+    return hcy < py + ph * 0.5
+
+
+def _match_head_to_person(heads, px, py, pw, ph):
+    """在 heads 列表中找与 person 框配对的最佳 head。
+    返回 (hx, hy, hw, hh, hscore) 或 None。
+    """
+    best = None
+    best_area = 0
+    for hx, hy, hw, hh, hscore in heads:
+        if _head_inside_person(hx, hy, hw, hh, px, py, pw, ph):
+            area = hw * hh
+            if area > best_area:
+                best_area = area
+                best = (hx, hy, hw, hh, hscore)
+    return best
+
+
 def detect_person(img):
     """YOLOv8 推理 + 目标锁定防抖。
-    锁定期间即使短暂无候选也保持上一帧位置，避免 EMA 被重置。
+    both 模式: person 框 + 配对 head 框同时绘制, 目标点 = head 中心。
     返回 (target_cx, target_cy, has_target)
     """
     global frame_count, detect_count, stat_head, stat_person
-    global locked_cx, locked_cy, locked_cls, locked_score, lock_last_s
+    global locked_cx, locked_cy, locked, lock_last_s
     frame_count += 1
     now_s = time.time()
 
-    # 推理
     try:
         boxes = model.predict([img])
     except Exception:
-        if locked_cls >= 0 and now_s - lock_last_s <= LOCK_TIMEOUT_S:
+        if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
             return locked_cx, locked_cy, True
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
     if not boxes or not boxes[0]:
-        # 无检测, 锁定未超时则保持
-        if locked_cls >= 0 and now_s - lock_last_s <= LOCK_TIMEOUT_S:
+        if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
             return locked_cx, locked_cy, True
-        locked_cls = -1
+        locked = False
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
-    detections = boxes[0]
+    # 合并所有类别的检测
+    detections = []
+    for cls_id, class_boxes in enumerate(boxes):
+        for d in class_boxes:
+            x, y, w, h, score, raw_cls = _unpack(d)
+            if raw_cls == 0 and cls_id > 0:
+                cls = cls_id
+            else:
+                cls = raw_cls
+            detections.append((x, y, w, h, score, cls))
 
-    # 按类别、阈值、面积筛选
-    candidates = []
-    for d in detections:
-        x, y, w, h, score, cls = _unpack(d)
+    # 按类别、阈值、面积筛选 → 分入 head / person 列表
+    heads = []
+    persons = []
+    for (x, y, w, h, score, cls) in detections:
         label = model.labels[int(cls)] if int(cls) < len(model.labels) else ""
         area = w * h
-
         if label == "head":
-            if score < HEAD_THRESHOLD or area < HEAD_MIN_AREA or area > HEAD_MAX_AREA:
-                continue
+            if score >= HEAD_THRESHOLD and HEAD_MIN_AREA <= area <= HEAD_MAX_AREA:
+                heads.append((x, y, w, h, score))
+                stat_head += 1
         elif label == "person":
-            if score < PERSON_THRESHOLD or area < PERSON_MIN_AREA:
-                continue
-        else:
-            continue
+            if score >= PERSON_THRESHOLD and area >= PERSON_MIN_AREA:
+                persons.append((x, y, w, h, score))
+                stat_person += 1
 
-        candidates.append((x, y, w, h, score, cls, area, label))
+    # ---- 候选生成: 根据 TRACK_MODE 构建 (target_cx, target_cy, draw_list) ----
+    candidates = []  # [(target_cx, target_cy, priority_key, draw_rects)]
+
+    if TRACK_MODE == "both":
+        # person + 配对 head
+        for px, py, pw, ph, pscore in persons:
+            paired_head = _match_head_to_person(heads, px, py, pw, ph)
+            if paired_head:
+                hx, hy, hw, hh, hscore = paired_head
+                tc = hx + hw // 2
+                ty = hy + hh // 2
+                draws = [
+                    (px, py, pw, ph, (0, 255, 0)),       # person 绿色
+                    (hx, hy, hw, hh, (255, 255, 0)),      # head 黄色
+                ]
+                candidates.append((tc, ty, pw * ph, draws))
+            else:
+                tc = px + pw // 2
+                ty = py + int(ph * BODY_CY_RATIO)
+                draws = [(px, py, pw, ph, (0, 255, 0))]
+                candidates.append((tc, ty, pw * ph, draws))
+
+        # 没有 person 时, 用 head 单独
+        if not persons:
+            for hx, hy, hw, hh, hscore in heads:
+                tc = hx + hw // 2
+                ty = hy + hh // 2
+                draws = [(hx, hy, hw, hh, (255, 255, 0))]
+                candidates.append((tc, ty, hw * hh, draws))
+
+    elif TRACK_MODE == "person":
+        for px, py, pw, ph, pscore in persons:
+            tc = px + pw // 2
+            ty = py + int(ph * BODY_CY_RATIO)
+            draws = [(px, py, pw, ph, (0, 255, 0))]
+            candidates.append((tc, ty, pw * ph, draws))
+
+    else:  # TRACK_MODE == "head"
+        for hx, hy, hw, hh, hscore in heads:
+            tc = hx + hw // 2
+            ty = hy + hh // 2
+            draws = [(hx, hy, hw, hh, (255, 255, 0))]
+            candidates.append((tc, ty, hw * hh, draws))
 
     if not candidates:
-        if locked_cls >= 0 and now_s - lock_last_s <= LOCK_TIMEOUT_S:
+        if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
             return locked_cx, locked_cy, True
-        locked_cls = -1
+        locked = False
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
-    # 锁定匹配: 在锁定距离内优先选最近的候选
-    if locked_cls >= 0 and now_s - lock_last_s <= LOCK_TIMEOUT_S:
-        candidates.sort(key=lambda c: abs(c[0] + c[2] // 2 - locked_cx)
-                                      + abs(c[1] + c[3] // 2 - locked_cy))
+    # ---- 锁定匹配：优先选离上一帧目标最近的候选 ----
+    if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
+        candidates.sort(key=lambda c: abs(c[0] - locked_cx) + abs(c[1] - locked_cy))
         nearest = candidates[0]
-        dist = abs(nearest[0] + nearest[2] // 2 - locked_cx) \
-             + abs(nearest[1] + nearest[3] // 2 - locked_cy)
+        dist = abs(nearest[0] - locked_cx) + abs(nearest[1] - locked_cy)
         if dist <= LOCK_DIST_PX:
-            x, y, w, h, score, cls, area, label = nearest
+            target_cx, target_cy, _, draws = nearest
         else:
-            candidates.sort(key=lambda c: c[6], reverse=True)
-            x, y, w, h, score, cls, area, label = candidates[0]
+            candidates.sort(key=lambda c: c[2], reverse=True)
+            target_cx, target_cy, _, draws = candidates[0]
     else:
-        candidates.sort(key=lambda c: c[6], reverse=True)
-        x, y, w, h, score, cls, area, label = candidates[0]
+        candidates.sort(key=lambda c: c[2], reverse=True)
+        target_cx, target_cy, _, draws = candidates[0]
 
-    # 更新锁定状态
-    locked_cx = x + w // 2
-    locked_cy = y + h // 2
-    locked_cls = int(cls)
-    locked_score = score
+    # 更新锁定
+    locked_cx = target_cx
+    locked_cy = target_cy
+    locked = True
     lock_last_s = now_s
 
-    # 统计
-    if label == "head":
-        stat_head += 1
-    elif label == "person":
-        stat_person += 1
-
-    # 目标点
-    if label == "head":
-        target_cx = x + w // 2
-        target_cy = y + h // 2
-        color = (255, 255, 0)
-    else:
-        target_cx = x + w // 2
-        target_cy = y + int(h * BODY_CY_RATIO)
-        color = (0, 255, 0)
-
-    # 绘制: bbox + 锁定十字
-    img.draw_rectangle((x, y, w, h), color=color, thickness=2)
-    br = max(8, w // 6)
+    # 绘制所有相关框 + 瞄准十字
+    for rx, ry, rw, rh, rcolor in draws:
+        img.draw_rectangle((rx, ry, rw, rh), color=rcolor, thickness=2)
+    br = max(8, min(draws[0][2], draws[0][3]) // 6)
     img.draw_rectangle((target_cx - br, target_cy - br, br * 2, br * 2),
                        color=(255, 0, 0), thickness=2)
     detect_count += 1
