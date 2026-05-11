@@ -3,7 +3,7 @@
 # 模型: YOLOv11n int8, 后处理器兼容 YoloV8
 # 舵机: P4 (TIM2_CH3, Base/Yaw), P5 (TIM2_CH4, Arm/Pitch)
 
-import csi, image, time, ml
+import csi, time, ml
 from machine import PWM, Pin
 from pyb import LED
 from ml.postprocessing.ultralytics import YoloV8
@@ -22,20 +22,11 @@ CAMERA_HMIRROR = True
 CAMERA_VFLIP   = True
 EXPOSURE_US    = 20000
 
-EMA_ALPHA = 0.2
-BBOX_EMA_ALPHA = 0.25
-
 HEAD_THRESHOLD   = 0.20
 PERSON_THRESHOLD = 0.35
 HEAD_MIN_AREA    = 50
 HEAD_MAX_AREA    = 30000
 PERSON_MIN_AREA  = 1000
-
-LOCK_DIST_PX    = 40
-LOCK_TIMEOUT_S  = 1.0
-
-TRACK_MODE = "both"
-BODY_CY_RATIO = 0.28
 
 # ============================================================
 # 舵机 PWM 参数
@@ -56,14 +47,12 @@ SERVO_ARM_MAX_NS   = 2400000
 # PD 控制参数 (移植自 STM32 control.h)
 # ============================================================
 
-YAW_KP   = 0.05
-YAW_KD   = 0.0
-PITCH_KP = 0.05
-PITCH_KD = 0.0
+KP = 0.05                        # 两轴共用 PD 参数
+KD = 0.01
+PD_EMA_ALPHA = 0.1
 
 PD_INNER_DEADZONE = 5
 PD_OUTER_DEADZONE = 15
-PD_EMA_ALPHA      = 0.1
 
 MAX_VELOCITY_BASE_NS = 20.0
 MAX_VELOCITY_ARM_NS  = 20.0
@@ -75,9 +64,27 @@ CENTER_Y = 128.0
 # SORT 多目标追踪参数
 # ============================================================
 
-SORT_MAX_LOST = 30
-SORT_IOU_MIN  = 0.3
+SORT_MAX_LOST = 60                   # 延长 track 存活时间 (~3.6s@16fps)
+SORT_IOU_MIN  = 0.15                 # head bbox 小, IoU 需放宽
 SORT_VELOCITY_SMOOTH = 0.7
+
+# ============================================================
+# Re-ID 颜色直方图参数
+# ============================================================
+
+REID_HIST_BINS = 64           # 4x4x4 RGB 量化
+REID_DIST_THRESHOLD = 0.50    # 直方图 L1 距离阈值, 越小越严格
+REID_SAMPLE_STEP = 8          # 像素采样步长 (加大减少 CPU 开销)
+REID_MAX_LOST_MEMORY = 120    # 保存已丢失 track 直方图的最大帧数
+REID_EVERY_N_FRAMES = 4       # 每 N 帧提取一次直方图
+REID_DEBUG = False              # 调试打印开关
+
+# ============================================================
+# 舵机回中参数
+# ============================================================
+
+RETURN_HOLD_TIME_MS = 2000    # 目标丢失后保持当前位置的时间 (ms)
+RETURN_SPEED_NS_PER_MS = 0.3  # 回中速度 (ns/ms)
 
 # ============================================================
 # 全局状态
@@ -87,22 +94,12 @@ cam = None
 model = None
 pwm_base = None
 pwm_arm = None
-frame_count = 0
+total_frame_count = 0            # 单调递增, 永不重置 (Re-ID 用)
+frame_count = 0                  # 5秒统计窗口内帧数
 detect_count = 0
-smooth_cx = 0
-smooth_cy = 0
-smooth_ready = False
-
-locked_cx = 0
-locked_cy = 0
-locked = False
-lock_last_s = 0.0
 
 stat_head = 0
 stat_person = 0
-
-smooth_person_box = None
-smooth_head_box = None
 
 pos_base = SERVO_BASE_NEUTRAL
 pos_arm  = SERVO_ARM_NEUTRAL
@@ -116,8 +113,9 @@ last_control_tick = 0
 sort_tracker = None
 selected_track_id = None
 sort_tracks = {}
-detection_persons = []
-detection_heads = []
+detection_targets = []           # SORT 追踪目标 (head bbox)
+lost_histograms = {}
+target_lost_tick = 0
 
 # ============================================================
 # 初始化
@@ -183,36 +181,52 @@ def _unpack(d):
         cls = d[5] if len(d) > 5 else 0
     return x, y, w, h, score, cls
 
-def _head_inside_person(hx, hy, hw, hh, px, py, pw, ph):
-    hcx = hx + hw // 2
-    hcy = hy + hh // 2
-    if not (px <= hcx <= px + pw and py <= hcy <= py + ph):
-        return False
-    return hcy < py + ph * 0.5
-
-def _match_head_to_person(heads, px, py, pw, ph):
-    best = None
-    best_area = 0
-    for hx, hy, hw, hh, hscore in heads:
-        if _head_inside_person(hx, hy, hw, hh, px, py, pw, ph):
-            area = hw * hh
-            if area > best_area:
-                best_area = area
-                best = (hx, hy, hw, hh, hscore)
-    return best
-
-def _ema_bbox(prev, curr, alpha):
-    if prev is None:
-        return float(curr[0]), float(curr[1]), float(curr[2]), float(curr[3])
-    return (prev[0] * (1 - alpha) + curr[0] * alpha,
-            prev[1] * (1 - alpha) + curr[1] * alpha,
-            prev[2] * (1 - alpha) + curr[2] * alpha,
-            prev[3] * (1 - alpha) + curr[3] * alpha)
-
 def _clamp(value, min_val, max_val):
     if value < min_val: return min_val
     if value > max_val: return max_val
     return value
+
+# ============================================================
+# Re-ID 颜色直方图
+# ============================================================
+
+def _extract_histogram(img, bbox):
+    """从图像 bbox 区域采样提取 64-bin RGB 直方图。"""
+    x, y, w, h = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+    x = max(0, x); y = max(0, y)
+    w = min(w, CAMERA_WINDOW_W - x); h = min(h, CAMERA_WINDOW_H - y)
+    if w < 4 or h < 4:
+        return None
+
+    hist = [0] * REID_HIST_BINS
+    # 只采样上半身 (top 40%), 减少背景干扰
+    sample_h = max(4, int(h * 0.4))
+    count = 0
+    for sy in range(y, y + sample_h, REID_SAMPLE_STEP):
+        for sx in range(x, x + w, REID_SAMPLE_STEP):
+            p = img.get_pixel((sx, sy))  # 返回 (R, G, B) 元组
+            # 各分量量化为 4 级 (0-3)
+            r = p[0] >> 6    # 0-255 → 0-3
+            g = p[1] >> 6
+            b = p[2] >> 6
+            idx = (r << 4) | (g << 2) | b  # 4x4x4 = 64
+            hist[idx] += 1
+            count += 1
+
+    if count > 0:
+        for i in range(REID_HIST_BINS):
+            hist[i] = hist[i] / count
+    return hist
+
+
+def _histogram_distance(h1, h2):
+    """L1 距离 (0~2 之间, 越小越相似)。"""
+    if h1 is None or h2 is None:
+        return 2.0
+    d = 0.0
+    for i in range(REID_HIST_BINS):
+        d += abs(h1[i] - h2[i])
+    return d
 
 # ============================================================
 # SORT 多目标追踪器
@@ -242,7 +256,13 @@ class SortTracker:
         union = a[2] * a[3] + b[2] * b[3] - inter
         return inter / union if union > 0 else 0.0
 
-    def update(self, detections):
+    def update(self, detections, img=None, do_reid=True):
+        """更新追踪器。do_reid=False 时跳过直方图提取以节省 CPU。"""
+
+        # 无 track 时重置 ID 计数器
+        if not self.tracks:
+            self.next_id = 0
+
         predicted = {}
         for tid, t in self.tracks.items():
             px = t["bbox"][0] + t["vel"][0]
@@ -253,6 +273,8 @@ class SortTracker:
 
         det_ids = list(range(len(detections)))
         trk_ids = list(predicted.keys())
+
+        # 1) IoU 匹配
         ious = {}
         for di in det_ids:
             for ti in trk_ids:
@@ -269,6 +291,25 @@ class SortTracker:
                 matched_dets.add(di)
                 matched_trks.add(ti)
 
+        # 2) 中心距离回退匹配 (head bbox 小, IoU 不可靠)
+        for di in det_ids:
+            if di in matched_dets:
+                continue
+            dx, dy = detections[di][0] + detections[di][2] // 2, detections[di][1] + detections[di][3] // 2
+            best_ti, best_dist = None, 30  # 30px 中心距离阈值
+            for ti in trk_ids:
+                if ti in matched_trks:
+                    continue
+                px, py = predicted[ti][0] + predicted[ti][2] // 2, predicted[ti][1] + predicted[ti][3] // 2
+                dist = abs(dx - px) + abs(dy - py)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_ti = ti
+            if best_ti is not None:
+                assignments.append((di, best_ti))
+                matched_dets.add(di)
+                matched_trks.add(best_ti)
+
         for di, ti in assignments:
             det = detections[di]
             t = self.tracks[ti]
@@ -279,28 +320,69 @@ class SortTracker:
             t["vel"][3] = self.vel_smooth * t["vel"][3] + (1 - self.vel_smooth) * (det[3] - old_bbox[3])
             t["bbox"] = list(det)
             t["lost"] = 0
+            # 更新直方图 (EMA), 仅每 N 帧执行
+            if do_reid and img is not None:
+                h = _extract_histogram(img, det)
+                if h is not None:
+                    if "hist" in t and t["hist"] is not None:
+                        for i in range(REID_HIST_BINS):
+                            t["hist"][i] = 0.8 * t["hist"][i] + 0.2 * h[i]
+                    else:
+                        t["hist"] = h
+
+        # 新 track: 仅在 do_reid 且有丢失记录时提取直方图做 Re-ID
+        if do_reid:
+            for lost_id in list(lost_histograms.keys()):
+                if total_frame_count - lost_histograms[lost_id][1] > REID_MAX_LOST_MEMORY:
+                    del lost_histograms[lost_id]
 
         for di in det_ids:
             if di not in matched_dets:
                 det = detections[di]
-                self.tracks[self.next_id] = {
-                    "bbox": list(det),
-                    "vel": [0.0, 0.0, 0.0, 0.0],
-                    "lost": 0,
-                    "total_lost": 0,
-                }
-                self.next_id += 1
+                new_hist = None
+                if do_reid and lost_histograms and img is not None:
+                    new_hist = _extract_histogram(img, det)
+                reused_id = None
+
+                # Re-ID: 与已丢失 track 的直方图比较
+                if new_hist is not None and lost_histograms:
+                    best_dist = REID_DIST_THRESHOLD
+                    for lost_id, entry in list(lost_histograms.items()):
+                        if not isinstance(entry, tuple) or len(entry) != 2:
+                            continue
+                        lost_hist, lost_frame = entry
+                        if total_frame_count - lost_frame > REID_MAX_LOST_MEMORY:
+                            del lost_histograms[lost_id]
+                            continue
+                        d = _histogram_distance(new_hist, lost_hist)
+                        if d < best_dist:
+                            best_dist = d
+                            reused_id = lost_id
+
+                tid = reused_id if reused_id is not None else self.next_id
+                if reused_id is not None:
+                    if REID_DEBUG: print("[ReID] matched lost track %d (dist=%.3f)" % (reused_id, best_dist))
+                    del lost_histograms[reused_id]
+                else:
+                    self.next_id += 1
+                t = {"bbox": list(det), "vel": [0.0, 0.0, 0.0, 0.0], "lost": 0}
+                if new_hist is not None:
+                    t["hist"] = new_hist
+                self.tracks[tid] = t
 
         dead_ids = []
         for ti in trk_ids:
             if ti not in matched_trks:
                 t = self.tracks[ti]
                 t["lost"] += 1
-                t["total_lost"] += 1
                 if t["lost"] > self.max_lost:
                     dead_ids.append(ti)
 
         for tid in dead_ids:
+            t = self.tracks[tid]
+            if "hist" in t and t["hist"] is not None:
+                lost_histograms[tid] = (t["hist"], total_frame_count)
+                if REID_DEBUG: print("[ReID] saved hist for track", tid)
             del self.tracks[tid]
 
         return self.tracks
@@ -310,31 +392,26 @@ class SortTracker:
 # ============================================================
 
 def detect_person(img):
-    global frame_count, detect_count, stat_head, stat_person
-    global locked_cx, locked_cy, locked, lock_last_s
-    global smooth_person_box, smooth_head_box
-    global detection_persons, detection_heads
+    global total_frame_count, frame_count, detect_count, stat_head, stat_person
+    global detection_targets
+    total_frame_count += 1
     frame_count += 1
-    now_s = time.time()
+
+    detection_targets = []  # 始终清空, 防止 SORT 收到过期数据
 
     try:
         boxes = model.predict([img])
     except Exception:
-        if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
-            return locked_cx, locked_cy, True
-        smooth_person_box = None
-        smooth_head_box = None
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
     if not boxes or not boxes[0]:
-        if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
-            return locked_cx, locked_cy, True
-        locked = False
-        smooth_person_box = None
-        smooth_head_box = None
         return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
-    detections = []
+    # 筛选 head 检测
+    best_cx, best_cy = CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2
+    best_area = 0
+    has_any = False
+
     for cls_id, class_boxes in enumerate(boxes):
         for d in class_boxes:
             x, y, w, h, score, raw_cls = _unpack(d)
@@ -342,103 +419,24 @@ def detect_person(img):
                 cls = cls_id
             else:
                 cls = raw_cls
-            detections.append((x, y, w, h, score, cls))
+            area = w * h
+            label = model.labels[int(cls)] if int(cls) < len(model.labels) else ""
+            if label == "head":
+                if score >= HEAD_THRESHOLD and HEAD_MIN_AREA <= area <= HEAD_MAX_AREA:
+                    detection_targets.append((x, y, w, h))
+                    stat_head += 1
+                    has_any = True
+                    if area > best_area:
+                        best_area = area
+                        best_cx, best_cy = x + w // 2, y + h // 2
+            elif label == "person":
+                if score >= PERSON_THRESHOLD and area >= PERSON_MIN_AREA:
+                    stat_person += 1
 
-    heads = []
-    persons = []
-    detection_persons = []
-    detection_heads = []
-    for (x, y, w, h, score, cls) in detections:
-        label = model.labels[int(cls)] if int(cls) < len(model.labels) else ""
-        area = w * h
-        if label == "head":
-            if score >= HEAD_THRESHOLD and HEAD_MIN_AREA <= area <= HEAD_MAX_AREA:
-                heads.append((x, y, w, h, score))
-                detection_heads.append((x, y, w, h, score))
-                stat_head += 1
-        elif label == "person":
-            if score >= PERSON_THRESHOLD and area >= PERSON_MIN_AREA:
-                persons.append((x, y, w, h, score))
-                detection_persons.append((x, y, w, h))
-                stat_person += 1
-
-    candidates = []
-
-    if TRACK_MODE == "both":
-        for px, py, pw, ph, pscore in persons:
-            paired_head = _match_head_to_person(heads, px, py, pw, ph)
-            if paired_head:
-                hx, hy, hw, hh, hscore = paired_head
-                tc = hx + hw // 2
-                ty = hy + hh // 2
-                draws = [
-                    (px, py, pw, ph, (0, 255, 0)),
-                    (hx, hy, hw, hh, (255, 255, 0)),
-                ]
-                candidates.append((tc, ty, pw * ph, draws))
-            else:
-                tc = px + pw // 2
-                ty = py + int(ph * BODY_CY_RATIO)
-                draws = [(px, py, pw, ph, (0, 255, 0))]
-                candidates.append((tc, ty, pw * ph, draws))
-
-        if not persons:
-            for hx, hy, hw, hh, hscore in heads:
-                tc = hx + hw // 2
-                ty = hy + hh // 2
-                draws = [(hx, hy, hw, hh, (255, 255, 0))]
-                candidates.append((tc, ty, hw * hh, draws))
-
-    elif TRACK_MODE == "person":
-        for px, py, pw, ph, pscore in persons:
-            tc = px + pw // 2
-            ty = py + int(ph * BODY_CY_RATIO)
-            draws = [(px, py, pw, ph, (0, 255, 0))]
-            candidates.append((tc, ty, pw * ph, draws))
-
-    else:
-        for hx, hy, hw, hh, hscore in heads:
-            tc = hx + hw // 2
-            ty = hy + hh // 2
-            draws = [(hx, hy, hw, hh, (255, 255, 0))]
-            candidates.append((tc, ty, hw * hh, draws))
-
-    if not candidates:
-        if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
-            return locked_cx, locked_cy, True
-        locked = False
-        smooth_person_box = None
-        smooth_head_box = None
-        return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
-
-    if locked and now_s - lock_last_s <= LOCK_TIMEOUT_S:
-        candidates.sort(key=lambda c: abs(c[0] - locked_cx) + abs(c[1] - locked_cy))
-        nearest = candidates[0]
-        dist = abs(nearest[0] - locked_cx) + abs(nearest[1] - locked_cy)
-        if dist <= LOCK_DIST_PX:
-            target_cx, target_cy, _, draws = nearest
-        else:
-            candidates.sort(key=lambda c: c[2], reverse=True)
-            target_cx, target_cy, _, draws = candidates[0]
-    else:
-        candidates.sort(key=lambda c: c[2], reverse=True)
-        target_cx, target_cy, _, draws = candidates[0]
-
-    locked_cx = target_cx
-    locked_cy = target_cy
-    locked = True
-    lock_last_s = now_s
-
-    for rx, ry, rw, rh, rcolor in draws:
-        if rcolor == (0, 255, 0):
-            sx, sy, sw, sh = _ema_bbox(smooth_person_box, (rx, ry, rw, rh), BBOX_EMA_ALPHA)
-            smooth_person_box = (sx, sy, sw, sh)
-        elif rcolor == (255, 255, 0):
-            sx, sy, sw, sh = _ema_bbox(smooth_head_box, (rx, ry, rw, rh), BBOX_EMA_ALPHA)
-            smooth_head_box = (sx, sy, sw, sh)
-
-    detect_count += 1
-    return target_cx, target_cy, True
+    if has_any:
+        detect_count += 1
+        return best_cx, best_cy, True
+    return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, False
 
 # ============================================================
 # PD 舵机控制器 (移植自 STM32 control.c)
@@ -447,7 +445,7 @@ def detect_person(img):
 def servo_control(cx, cy, has_target):
     global pos_base, pos_arm
     global last_error_x, last_error_y, yaw_deriv, pitch_deriv
-    global last_control_tick
+    global last_control_tick, target_lost_tick
 
     now_us = time.ticks_us()
     dt_ms = 0.0
@@ -456,25 +454,47 @@ def servo_control(cx, cy, has_target):
         dt_ms = dt_ticks / 1000.0
     last_control_tick = now_us
 
-    if dt_ms <= 0:
-        dt_ms = 33.0
-    elif dt_ms > 100.0:
+    if dt_ms <= 0 or dt_ms > 100.0:
         dt_ms = 33.0
 
     if not has_target:
-        last_error_x = 0.0
-        last_error_y = 0.0
-        yaw_deriv = 0.0
-        pitch_deriv = 0.0
+        # 回中策略: 先保持 N ms, 然后缓慢滑回中位
+        if target_lost_tick == 0:
+            target_lost_tick = now_us
+
+        lost_ms = time.ticks_diff(now_us, target_lost_tick) / 1000.0
+
+        last_error_x = 0.0; last_error_y = 0.0
+        yaw_deriv = 0.0; pitch_deriv = 0.0
+
+        if lost_ms < RETURN_HOLD_TIME_MS:
+            return  # 保持当前位置
+
+        # 滑回中位
+        step = RETURN_SPEED_NS_PER_MS * dt_ms
+        if pos_base > SERVO_BASE_NEUTRAL:
+            pos_base = max(SERVO_BASE_NEUTRAL, pos_base - step)
+        else:
+            pos_base = min(SERVO_BASE_NEUTRAL, pos_base + step)
+        if pos_arm > SERVO_ARM_NEUTRAL:
+            pos_arm = max(SERVO_ARM_NEUTRAL, pos_arm - step)
+        else:
+            pos_arm = min(SERVO_ARM_NEUTRAL, pos_arm + step)
+
+        pwm_base.duty_ns(int(pos_base))
+        pwm_arm.duty_ns(int(pos_arm))
         return
+
+    # 有目标: 重置丢失计时
+    target_lost_tick = 0
 
     tx = int(round((cx / CAMERA_WINDOW_W) * 255))
     ty = int(round((cy / CAMERA_WINDOW_H) * 255))
     raw_dx = float(tx) - CENTER_X
     raw_dy = float(ty) - CENTER_Y
 
-    abs_dx = raw_dx if raw_dx >= 0 else -raw_dx
-    abs_dy = raw_dy if raw_dy >= 0 else -raw_dy
+    abs_dx = abs(raw_dx)
+    abs_dy = abs(raw_dy)
 
     scale_x = 1.0
     if abs_dx <= PD_INNER_DEADZONE:
@@ -494,19 +514,20 @@ def servo_control(cx, cy, has_target):
     new_error_y = (raw_dy / 255.0) * scale_y
 
     alpha = PD_EMA_ALPHA
-    yaw_deriv = alpha * ((new_error_x - last_error_x) / (dt_ms / 1000.0)) + (1.0 - alpha) * yaw_deriv
-    pitch_deriv = alpha * ((new_error_y - last_error_y) / (dt_ms / 1000.0)) + (1.0 - alpha) * pitch_deriv
+    yaw_deriv = (1 - alpha) * yaw_deriv + alpha * ((new_error_x - last_error_x) / (dt_ms / 1000.0))
+    pitch_deriv = (1 - alpha) * pitch_deriv + alpha * ((new_error_y - last_error_y) / (dt_ms / 1000.0))
 
-    yaw_out = YAW_KP * new_error_x + YAW_KD * yaw_deriv
-    pitch_out = PITCH_KP * new_error_y + PITCH_KD * pitch_deriv
+    yaw_out = KP * new_error_x + KD * yaw_deriv
+    pitch_out = KP * new_error_y + KD * pitch_deriv
 
     vel_scale = 500.0 * dt_ms / 10.0
     yaw_vel = yaw_out * vel_scale
     pitch_vel = pitch_out * vel_scale
 
-    max_vel = MAX_VELOCITY_BASE_NS * dt_ms / 10.0
-    yaw_vel = _clamp(yaw_vel, -max_vel, max_vel)
-    pitch_vel = _clamp(pitch_vel, -max_vel, max_vel)
+    max_yaw = MAX_VELOCITY_BASE_NS * dt_ms / 10.0
+    max_pitch = MAX_VELOCITY_ARM_NS * dt_ms / 10.0
+    yaw_vel = _clamp(yaw_vel, -max_yaw, max_yaw)
+    pitch_vel = _clamp(pitch_vel, -max_pitch, max_pitch)
 
     pos_base += yaw_vel
     pos_arm  += pitch_vel
@@ -533,20 +554,19 @@ def select_servo_target():
         t = sort_tracks[selected_track_id]
         if t["lost"] <= 5:
             b = t["bbox"]
-            return int(b[0] + b[2] // 2), int(b[1] + b[3] * BODY_CY_RATIO), selected_track_id, True
+            return int(b[0] + b[2] // 2), int(b[1] + b[3] // 2), selected_track_id, True
 
-    best, best_area = None, 0
-    for tid, t in sort_tracks.items():
-        if t["lost"] == 0:
-            area = t["bbox"][2] * t["bbox"][3]
-            if area > best_area:
-                best_area = area
-                best = (tid, t)
+    # 自动锁最小 ID 的活跃 track
+    best_id = None
+    for tid in sorted(sort_tracks.keys()):
+        if sort_tracks[tid]["lost"] == 0:
+            best_id = tid
+            break
 
-    if best:
-        tid, t = best
+    if best_id is not None:
+        t = sort_tracks[best_id]
         b = t["bbox"]
-        return int(b[0] + b[2] // 2), int(b[1] + b[3] * BODY_CY_RATIO), tid, True
+        return int(b[0] + b[2] // 2), int(b[1] + b[3] // 2), best_id, True
 
     return CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2, None, False
 
@@ -597,7 +617,7 @@ if __name__ == "__main__":
 
     print("追踪已启动")
     print("  模型: %s" % MODEL_PATH)
-    print("  KP=%.3f KD=%.3f 死区=%d-%dpx" % (YAW_KP, YAW_KD, PD_INNER_DEADZONE, PD_OUTER_DEADZONE))
+    print("  KP=%.3f KD=%.3f 死区=%d-%dpx" % (KP, KD, PD_INNER_DEADZONE, PD_OUTER_DEADZONE))
 
     clock = time.clock()
     last_report = time.time()
@@ -608,42 +628,47 @@ if __name__ == "__main__":
 
         cx, cy, has_target = detect_person(img)
 
-        sort_tracks = sort_tracker.update(detection_persons)
+        sort_tracks = sort_tracker.update(detection_targets, img,
+            do_reid=(frame_count % REID_EVERY_N_FRAMES == 0))
 
-        # 绘制 SORT track: 绿框+ID, 选中目标红框+头部标记
-        for tid, t in sort_tracks.items():
+        # 按 head 面积从大到小重排显示 ID: 最大=0, 次大=1, ...
+        display_id = {}
+        sorted_tracks = sorted(sort_tracks.items(),
+            key=lambda x: x[1]["bbox"][2] * x[1]["bbox"][3], reverse=True)
+        for new_id, (orig_id, t) in enumerate(sorted_tracks):
+            display_id[orig_id] = new_id
+
+        # 始终锁定 ID 0 (面积最大的 head)
+        has_track = False
+        for orig_id, t in sorted_tracks:
+            if t["lost"] == 0:
+                selected_track_id = orig_id
+                b = t["bbox"]
+                target_cx, target_cy = int(b[0] + b[2] // 2), int(b[1] + b[3] // 2)
+                has_track = True
+                break
+        if not has_track:
+            selected_track_id = None
+
+        # 绘制: 锁定目标红框, 其余绿框, 使用重排后的显示 ID
+        for orig_id, t in sort_tracks.items():
             if t["lost"] == 0:
                 bx, by, bw, bh = t["bbox"]
-                is_sel = (selected_track_id is not None and tid == selected_track_id)
+                is_sel = (selected_track_id is not None and orig_id == selected_track_id)
                 color = (255, 0, 0) if is_sel else (0, 255, 0)
                 img.draw_rectangle((int(bx), int(by), int(bw), int(bh)), color=color, thickness=2)
-                img.draw_string((int(bx), int(by) - 10), "ID:%d" % tid, color=color, scale=2)
-                if is_sel and detection_heads:
-                    best_h = _match_head_to_person(detection_heads, bx, by, bw, bh)
-                    if best_h:
-                        hx, hy, hw, hh, _ = best_h
-                        hcx, hcy = int(hx + hw // 2), int(hy + hh // 2)
-                        img.draw_circle((hcx, hcy), max(4, hw // 4), color=(255, 0, 0), thickness=2)
+                img.draw_string((int(bx), int(by) - 10), "ID:%d" % display_id.get(orig_id, 0),
+                    color=color, scale=2)
 
-        track_cx, track_cy, track_id, has_track = select_servo_target()
-
+        # 舵机驱动: 优先 SORT track, 否则用 detect_person 单帧输出
         if has_track:
-            target_cx, target_cy = track_cx, track_cy
-        else:
+            pass  # target_cx/cy already set above
+        elif has_target:
             target_cx, target_cy = cx, cy
-            has_target = False
-
-        if has_target or has_track:
-            if not smooth_ready:
-                smooth_cx, smooth_cy = target_cx, target_cy
-                smooth_ready = True
-            else:
-                smooth_cx = smooth_cx * (1 - EMA_ALPHA) + target_cx * EMA_ALPHA
-                smooth_cy = smooth_cy * (1 - EMA_ALPHA) + target_cy * EMA_ALPHA
-            servo_control(int(smooth_cx), int(smooth_cy), True)
         else:
-            smooth_ready = False
-            servo_control(0, 0, False)
+            target_cx, target_cy = CAMERA_WINDOW_W // 2, CAMERA_WINDOW_H // 2
+
+        servo_control(target_cx, target_cy, has_target or has_track)
 
         set_led_status(2 if (has_target or has_track) else 3)
 
@@ -651,7 +676,10 @@ if __name__ == "__main__":
         if now - last_report >= 5.0:
             fps = clock.fps()
             rate = (detect_count / frame_count * 100) if frame_count > 0 else 0
-            track_count = len([t for t in sort_tracks.values() if t["lost"] == 0])
+            track_count = 0
+            for t in sort_tracks.values():
+                if t["lost"] == 0:
+                    track_count += 1
             print("5s: 帧=%d 命中=%d 命中率=%.1f%% fps=%.1f tracks=%d head=%d person=%d" % (
                 frame_count, detect_count, rate, fps, track_count, stat_head, stat_person))
             frame_count = 0
