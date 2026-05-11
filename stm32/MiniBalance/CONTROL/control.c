@@ -195,8 +195,8 @@ void OpenMV_Control(void)
         float yaw_out   = YAW_KP * new_error_x + YAW_KD * yaw_deriv;
         float pitch_out = PITCH_KP * new_error_y + PITCH_KD * pitch_deriv;
 
-        float yaw_vel   = -(yaw_out * 500.0f);
-        float pitch_vel = -(pitch_out * 500.0f);
+        float yaw_vel   = yaw_out * 500.0f;
+        float pitch_vel = pitch_out * 500.0f;
         Velocity1 = Clamp_Float(yaw_vel,   -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
         Velocity2 = Clamp_Float(pitch_vel, -OPENMV_MAX_DELTA, OPENMV_MAX_DELTA);
         OpenMV_Armed = 1;
