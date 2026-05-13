@@ -4,11 +4,19 @@
 # 控制: PD 控制器 → PWM 直驱舵机
 # 舵机: P7 (Base/Yaw), P9 (Arm/Pitch)
 
-import csi, time, ml
+import csi, time, gc
 from machine import PWM, Pin
 from pyb import LED
-from ml.postprocessing.mediapipe import BlazeFace
-from ml.utils import draw_keypoints
+
+try:
+    import ml
+    from ml.postprocessing.mediapipe import BlazeFace
+    from ml.utils import draw_keypoints
+except ImportError as e:
+    print("[FATAL] ml 模块加载失败:", e)
+    LED(1).on()
+    while True:
+        time.sleep_ms(500)
 
 # ============================================================
 # 舵机方向 (调试: 改 1↔-1 翻转该轴)
@@ -21,9 +29,9 @@ PITCH_DIR = 1   # 摇臂舵机 P9:  1=正向, -1=反向
 # 视觉参数
 # ============================================================
 
-CAMERA_WINDOW_W = 480  # VGA 640×480 → 最大方形裁剪
-CAMERA_WINDOW_H = 480
-BLAZEFACE_THRESHOLD = 0.35  # 人脸检测置信度 (降低=更远可检, 但可能误检)
+CAMERA_WINDOW_W = 320  # VGA 640×480 → 缩小窗口提升模型空间分辨率
+CAMERA_WINDOW_H = 320
+BLAZEFACE_THRESHOLD = 0.25  # 人脸检测置信度 (降低=更远可检, 但可能误检)
 
 CAMERA_HMIRROR = True
 CAMERA_VFLIP   = True
@@ -35,7 +43,7 @@ DRAW_ENABLE    = False  # IDE 调试时改为 True, 脱机运行保持 False
 # ============================================================
 
 TRACK_LOST_MAX  = 30        # 连续丢失多少帧后彻底放弃
-TRACK_MAX_JUMP  = 80        # 新目标与上次位置超过此距离视为误检 (px)
+TRACK_MAX_JUMP  = 55        # 新目标与上次位置超过此距离视为误检 (px)
 
 # ============================================================
 # 舵机 PWM
@@ -49,8 +57,8 @@ SERVO_BASE_NEUTRAL = 1500000  # 中位 1500us
 SERVO_BASE_MIN_NS  = 500000
 SERVO_BASE_MAX_NS  = 2500000
 SERVO_ARM_NEUTRAL  = 1500000
-SERVO_ARM_MIN_NS   = 800000
-SERVO_ARM_MAX_NS   = 2200000
+SERVO_ARM_MIN_NS   = 1000000
+SERVO_ARM_MAX_NS   = 2000000
 
 # ============================================================
 # PD 控制参数
@@ -59,14 +67,14 @@ SERVO_ARM_MAX_NS   = 2200000
 CAM_CX = CAMERA_WINDOW_W // 2  # 240
 CAM_CY = CAMERA_WINDOW_H // 2  # 240
 
-KP = 1.5            # 比例增益: 误差→速度 (增大=更快响应)
-KD = 0.05           # 微分增益: 抑制震荡 (增大=更强阻尼)
-DERIV_DEAD = 2      # 导数死区 (pixels) — 过滤检测噪声防微抖
+KP = 0.8            # 比例增益: 误差→速度 (增大=更快响应)
+KD = 0.1            # 微分增益: 抑制震荡 (增大=更强阻尼)
+DERIV_DEAD = 5      # 导数死区 (pixels) — 过滤检测噪声防微抖
 
-PD_DEAD_INNER = 18  # 完全死区 (pixels) — 加宽防微抖
-PD_DEAD_OUTER = 40  # 过渡区外边界 (pixels)
+PD_DEAD_INNER = 13  # 完全死区 (pixels) — 加宽防微抖
+PD_DEAD_OUTER = 27  # 过渡区外边界 (pixels)
 
-SERVO_GAIN = 12000    # 像素误差→舵机速度 (ns/s per pixel)
+SERVO_GAIN = 18000    # 像素误差→舵机速度 (ns/s per pixel, 320窗补偿)
 MAX_STEP_NS = 50000   # 每 tick 最大步进 (ns)
 PWM_DEAD_NS = 5000    # PWM 输出死区 (ns) — 不够 5us 不更新, 防微抖
 
@@ -170,7 +178,7 @@ def deadzone(pixels, inner, outer):
         return 0.0
     if a < outer:
         t = (a - inner) / (outer - inner)
-        return (1 if pixels > 0 else -1) * pixels * (t * t)
+        return pixels * t  # 线性过渡, 边界增益无尖峰
     return float(pixels)
 
 def _pwm_write(pwm, value):
@@ -198,10 +206,10 @@ def servo_control(cx, cy, has_target):
 
     now_us = time.ticks_us()
     if last_ctrl_tick == 0:
-        dt_ms = 33.0
-    else:
-        dt_ticks = time.ticks_diff(now_us, last_ctrl_tick)
-        dt_ms = dt_ticks / 1000.0
+        last_ctrl_tick = now_us
+        return
+    dt_ticks = time.ticks_diff(now_us, last_ctrl_tick)
+    dt_ms = dt_ticks / 1000.0
     if dt_ms < 1.0 or dt_ms > 100:
         dt_ms = 33.0
     last_ctrl_tick = now_us
@@ -238,13 +246,13 @@ def servo_control(cx, cy, has_target):
     err_x = deadzone(raw_px, PD_DEAD_INNER, PD_DEAD_OUTER)
     err_y = deadzone(raw_py, PD_DEAD_INNER, PD_DEAD_OUTER)
 
-    # ---- PD (导数加死区过滤检测噪声) ----
-    derr_x = err_x - last_err_px
-    derr_y = err_y - last_err_py
+    # ---- PD (导数用原始误差; 死区内强制切除 D 项防检测噪声) ----
+    derr_x = raw_px - last_err_px if err_x != 0.0 else 0.0
+    derr_y = raw_py - last_err_py if err_y != 0.0 else 0.0
     if abs(derr_x) <= DERIV_DEAD: derr_x = 0.0
     if abs(derr_y) <= DERIV_DEAD: derr_y = 0.0
-    deriv_px = derr_x / dt_s
-    deriv_py = derr_y / dt_s
+    deriv_px = derr_x / dt_s if derr_x != 0.0 else 0.0
+    deriv_py = derr_y / dt_s if derr_y != 0.0 else 0.0
 
     out_x = KP * err_x + KD * deriv_px
     out_y = KP * err_y + KD * deriv_py
@@ -262,28 +270,48 @@ def servo_control(cx, cy, has_target):
     _pwm_write(pwm_base, int(pos_base_ns))
     _pwm_write(pwm_arm,  int(pos_arm_ns))
 
-    last_err_px = err_x
-    last_err_py = err_y
+    last_err_px = raw_px
+    last_err_py = raw_py
 
 # ============================================================
 # 人脸追踪
 # ============================================================
 
 def get_target(faces):
-    """返回 (cx, cy, bbox, has_target)。防误检跳变。"""
+    """返回 (cx, cy, bbox, has_target)。始终跟踪距离上次位置最近的脸。"""
     global last_cx, last_cy, track_lost
 
     if faces:
-        best = max(faces, key=lambda f: f[0][2] * f[0][3])
+        if last_cx > 0:
+            # 已锁定: 选离上次位置最近的脸, 防止多人/误检时跳目标
+            best = min(faces, key=lambda f:
+                abs(int(f[0][0] + f[0][2] // 2) - last_cx) +
+                abs(int(f[0][1] + f[0][3] // 2) - last_cy))
+        else:
+            # 首次/复位后: 选最大脸
+            best = max(faces, key=lambda f: f[0][2] * f[0][3])
+
         bbox, score, _kp = best
         cx = int(bbox[0] + bbox[2] // 2)
         cy = int(bbox[1] + bbox[3] // 2)
 
-        # 空间一致性: 如果新目标离上次位置太远, 视为误检/他人脸, 保持旧位置
-        if track_lost == 0 and last_cx > 0:
+        # 边界保护: 丢弃越界检测框 (模型偶发异常输出)
+        if not (0 <= cx < CAMERA_WINDOW_W and 0 <= cy < CAMERA_WINDOW_H):
+            track_lost += 1
+            if track_lost <= TRACK_LOST_MAX:
+                return last_cx, last_cy, None, True
+            last_cx, last_cy = 0, 0
+            return 0, 0, None, False
+
+        if last_cx > 0:
             dist = abs(cx - last_cx) + abs(cy - last_cy)
             if dist > TRACK_MAX_JUMP:
-                return last_cx, last_cy, bbox, True
+                # 跳变保护: 递增丢失计数, 超过阈值后彻底复位重捕获
+                track_lost += 1
+                if track_lost <= TRACK_LOST_MAX:
+                    return last_cx, last_cy, bbox, True
+                last_cx, last_cy = 0, 0
+                return 0, 0, None, False
 
         last_cx, last_cy = cx, cy
         track_lost = 0
@@ -292,6 +320,7 @@ def get_target(faces):
     track_lost += 1
     if track_lost <= TRACK_LOST_MAX:
         return last_cx, last_cy, None, True
+    last_cx, last_cy = 0, 0
     return 0, 0, None, False
 
 # ============================================================
@@ -396,3 +425,4 @@ if __name__ == "__main__":
             frame_count = 0
             face_count = 0
             last_report = now
+            gc.collect()
