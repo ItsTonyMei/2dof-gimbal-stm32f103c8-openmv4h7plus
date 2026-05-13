@@ -1,6 +1,7 @@
-# OpenMV4 H7 Plus — 颜色追踪固件（二自由度云台）
+# OpenMV4 H7 Plus — 颜色追踪固件（旧硬件兼容）
 # 通过 UART3 发送目标位置到 STM32F103C8T6（5 字节协议）。
 # LAB 颜色阈值追踪, 30-60 fps。
+# 注意: 当前主控已迁移到 N6 单板方案 (main.py), 此文件仅供 H7 Plus 使用。
 
 import sensor, image, time
 from pyb import UART, LED

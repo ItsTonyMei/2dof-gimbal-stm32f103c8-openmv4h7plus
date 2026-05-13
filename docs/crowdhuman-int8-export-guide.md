@@ -1,5 +1,8 @@
 # CrowdHuman YOLOv11n → STM32N6 NPU 真 int8 量化导出指南
 
+> **已废弃。** 当前项目使用 ROM 内置的 BlazeFace (186KB/128×128)，不再使用 YOLO。
+> 此文档保留作为量化导出参考。
+
 ## 背景
 
 模型: YOLOv11n, CrowdHuman head+person 双类, 320×320, int8 量化。
