@@ -22,3 +22,6 @@ stm32/MDK-ARM/tmp/
 stm32/MDK-ARM/*.log
 stm32/MDK-ARM/vcpkg-configuration.json
 stm32/MDK-ARM/RTE/
+__pycache__/
+st_ai_output/
+st_ai_ws/
