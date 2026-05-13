@@ -1,7 +1,7 @@
 # OpenMV N6 — BlazeFace 人脸追踪 + PD 舵机控制（精简单板方案）
 # 检测: Google MediaPipe BlazeFace (128×128, 186KB, ROM 内置)
-# 追踪: 直接取最大脸 + PD 平滑
-# 控制: PD 控制器 → PWM 直驱舵机
+# 追踪: 最近脸优先 + 跳变保护 + 丢失复位重捕获
+# 控制: PD 控制器 + 线性死区 + 导数死区 + PWM 输出死区
 # 舵机: P7 (Base/Yaw), P9 (Arm/Pitch)
 
 import csi, time, gc
@@ -64,8 +64,8 @@ SERVO_ARM_MAX_NS   = 2000000
 # PD 控制参数
 # ============================================================
 
-CAM_CX = CAMERA_WINDOW_W // 2  # 240
-CAM_CY = CAMERA_WINDOW_H // 2  # 240
+CAM_CX = CAMERA_WINDOW_W // 2  # 160
+CAM_CY = CAMERA_WINDOW_H // 2  # 160
 
 KP = 0.8            # 比例增益: 误差→速度 (增大=更快响应)
 KD = 0.1            # 微分增益: 抑制震荡 (增大=更强阻尼)
@@ -198,7 +198,7 @@ def _pwm_write(pwm, value):
 
 def servo_control(cx, cy, has_target):
     """PD 控制器 (像素误差 → 舵机速度)。
-    cx, cy: 目标中心像素坐标 [0, 480]。
+    cx, cy: 目标中心像素坐标 [0, 320]。
     """
     global pos_base_ns, pos_arm_ns
     global last_err_px, last_err_py, last_ctrl_tick
@@ -379,7 +379,7 @@ if __name__ == "__main__":
         except Exception as e:
             faces = []
 
-        # 3. 目标选取 (无 EMA, 直接取最大脸)
+        # 3. 目标选取 (最近脸优先 + 跳变保护 + 超时复位)
         track_cx, track_cy, track_bbox, has_target = get_target(faces)
 
         # 4. 舵机控制 (每帧, ~70Hz 丝滑)
