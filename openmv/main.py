@@ -11,7 +11,6 @@ from pyb import LED
 try:
     import ml
     from ml.postprocessing.mediapipe import BlazeFace
-    from ml.utils import draw_keypoints
 except ImportError as e:
     print("[FATAL] ml 模块加载失败:", e)
     LED(1).on()
@@ -35,7 +34,6 @@ BLAZEFACE_THRESHOLD = 0.25  # 人脸检测置信度 (降低=更远可检, 但可
 
 CAMERA_HMIRROR = True
 CAMERA_VFLIP   = True
-EXPOSURE_US    = 20000  # 固定曝光 20ms
 DRAW_ENABLE    = False  # IDE 调试时改为 True, 脱机运行保持 False
 
 # ============================================================
@@ -130,8 +128,8 @@ def init_camera():
     cam.hmirror(CAMERA_HMIRROR)
     cam.vflip(CAMERA_VFLIP)
     cam.snapshot(time=2000)                     # 等待传感器稳定
-    cam.auto_gain(False)
-    cam.auto_exposure(False, exposure_us=EXPOSURE_US)
+    cam.auto_gain(True)
+    cam.auto_exposure(True)
     print("[CAM] %dx%d 初始化成功" % (CAMERA_WINDOW_W, CAMERA_WINDOW_H))
     return True
 
@@ -390,11 +388,10 @@ if __name__ == "__main__":
         # 5. 画面绘制 (DRAW_ENABLE=True 时启用, 脱机=False 省性能)
         if DRAW_ENABLE and loop_cnt % 2 == 0:
             if faces:
-                for bbox, score, kp in faces:
+                for bbox, score, _kp in faces:
                     x, y, w, h = bbox
                     img.draw_rectangle((int(x), int(y), int(w), int(h)),
                                        color=(0, 255, 0), thickness=2)
-                    draw_keypoints(img, kp, color=(255, 0, 0))
 
             if has_target and track_bbox is not None:
                 bx, by, bw, bh = track_bbox
