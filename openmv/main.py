@@ -30,7 +30,7 @@ PITCH_DIR = 1   # 摇臂舵机 P9:  1=正向, -1=反向
 
 CAMERA_WINDOW_W = 320  # VGA 640×480 → 缩小窗口提升模型空间分辨率
 CAMERA_WINDOW_H = 320
-BLAZEFACE_THRESHOLD = 0.25  # 人脸检测置信度 (降低=更远可检, 但可能误检)
+BLAZEFACE_THRESHOLD = 0.5  # 人脸检测置信度 (降低=更远可检, 但可能误检)
 
 CAMERA_HMIRROR = True
 CAMERA_VFLIP   = True
