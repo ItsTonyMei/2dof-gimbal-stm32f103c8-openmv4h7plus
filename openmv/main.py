@@ -65,7 +65,7 @@ SERVO_ARM_MAX_NS   = 2000000
 CAM_CX = CAMERA_WINDOW_W // 2  # 160
 CAM_CY = CAMERA_WINDOW_H // 2  # 160
 
-KP = 0.8            # 比例增益: 误差→速度 (增大=更快响应)
+KP = 0.2            # 比例增益: 误差→速度 (增大=更快响应)
 KD = 0.1            # 微分增益: 抑制震荡 (增大=更强阻尼)
 DERIV_DEAD = 5      # 导数死区 (pixels) — 过滤检测噪声防微抖
 
