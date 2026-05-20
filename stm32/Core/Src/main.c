@@ -6,7 +6,7 @@
 #include "sys.h"
 #include "control.h"
 
-// 调试开关: 编译时定义 DEBUG_PRINTF 以启用串口调试输出
+// 调试开关 (Debug Switch): 编译时定义 DEBUG_PRINTF 以启用串口调试输出 (UART Debug Output)
 // (在 build_gcc.sh 中添加 -DDEBUG_PRINTF)
 
 u8 Flag_Show = 0;
@@ -39,8 +39,8 @@ int main(void)
 
     OLED_Init();
 
-    // 独立看门狗: LSI 40kHz / 64 = 625 Hz, 重装载 62 → ~100ms 超时
-    // TIM2 回调每 10ms 喂狗, 连续 10 次中断丢失则复位
+    // 独立看门狗 (IWDG): LSI 40kHz / 64 = 625 Hz, 重装载 (Reload) 62 → ~100ms 超时 (Timeout)
+    // TIM2 回调 (Callback) 每 10ms 喂狗 (Kick), 连续 10 次中断丢失则复位 (Reset)
     IWDG->KR = 0x5555;
     IWDG->PR = 0x04;
     IWDG->RLR = 62;

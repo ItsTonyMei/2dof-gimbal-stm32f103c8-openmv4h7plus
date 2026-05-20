@@ -1,22 +1,22 @@
 /***********************************************
- * OLED 驱动 (SSD1306 128x64, 软件 SPI)
+ * OLED 驱动 (OLED Driver, SSD1306 128x64, 软件 SPI / Software SPI)
  ***********************************************/
 #include "oled.h"
 #include "stdlib.h"
 #include "oledfont.h"
 #include "stm32f1xx_hal.h"
 	   
-u8 OLED_GRAM[128][8];	 
+u8 OLED_GRAM[128][8];	 // 显存 (Frame Buffer)
 void OLED_Refresh_Gram(void)
 {
-	u8 i,n;		    
-	for(i=0;i<8;i++)  
-	{  
+	u8 i,n;
+	for(i=0;i<8;i++)
+	{
 		OLED_WR_Byte (0xb0+i,OLED_CMD);    //设置页地址（0~7）
 		OLED_WR_Byte (0x00,OLED_CMD);      //设置显示位置—列低地址
-		OLED_WR_Byte (0x10,OLED_CMD);      //设置显示位置—列高地址   
-		for(n=0;n<128;n++)OLED_WR_Byte(OLED_GRAM[n][i],OLED_DATA); 
-	}   
+		OLED_WR_Byte (0x10,OLED_CMD);      //设置显示位置—列高地址
+		for(n=0;n<128;n++)OLED_WR_Byte(OLED_GRAM[n][i],OLED_DATA);
+	}
 }
 
 //向OLED写入一个字节。

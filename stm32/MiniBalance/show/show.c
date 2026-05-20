@@ -2,7 +2,7 @@
 
 void oled_show(void)
 {
-    // OpenMV 追踪模式显示 (128x64 OLED, 纯 ASCII 字库, 直接覆写避免闪烁)
+    // OpenMV 追踪模式显示 (Tracking Display, 128x64 OLED, 纯 ASCII 字库, 直接覆写避免闪烁)
     OLED_ShowString(0, 0,  "MODE: OpenMV");
 
     extern volatile uint32_t OpenMV_Frame_Count;

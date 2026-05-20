@@ -63,10 +63,10 @@ extern UART_HandleTypeDef huart3;
 /* USER CODE END EV */
 
 /******************************************************************************/
-/*           Cortex-M3 处理器中断和异常处理函数                                */
+/*           Cortex-M3 处理器中断和异常处理函数 (Interrupt & Exception Handlers) */
 /******************************************************************************/
 /**
-  * @brief 处理不可屏蔽中断 (NMI)
+  * @brief 处理不可屏蔽中断 (NMI / Non-Maskable Interrupt)
   */
 void NMI_Handler(void)
 {
@@ -96,7 +96,7 @@ void HardFault_Handler(void)
 }
 
 /**
-  * @brief 处理内存管理错误 (MemManage)
+  * @brief 处理内存管理错误 (MemManage / Memory Management Fault)
   */
 void MemManage_Handler(void)
 {
@@ -141,7 +141,7 @@ void UsageFault_Handler(void)
 }
 
 /**
-  * @brief 处理系统服务调用 (SVC)
+  * @brief 处理系统服务调用 (SVC / Supervisor Call)
   */
 void SVC_Handler(void)
 {
@@ -154,7 +154,7 @@ void SVC_Handler(void)
 }
 
 /**
-  * @brief 处理调试监视器 (DebugMon)
+  * @brief 处理调试监视器 (DebugMon / Debug Monitor)
   */
 void DebugMon_Handler(void)
 {
@@ -167,7 +167,7 @@ void DebugMon_Handler(void)
 }
 
 /**
-  * @brief 处理可挂起系统服务请求 (PendSV)
+  * @brief 处理可挂起系统服务请求 (PendSV / Pendable Service Call)
   */
 void PendSV_Handler(void)
 {
@@ -180,7 +180,7 @@ void PendSV_Handler(void)
 }
 
 /**
-  * @brief 处理系统滴答定时器 (SysTick)
+  * @brief 处理系统滴答定时器 (SysTick / System Tick Timer)
   */
 void SysTick_Handler(void)
 {
@@ -194,12 +194,12 @@ void SysTick_Handler(void)
 }
 
 /******************************************************************************/
-/* STM32F1xx 外设中断处理函数                                                  */
+/* STM32F1xx 外设中断处理函数 (Peripheral Interrupt Handlers)                    */
 /* 在此添加所使用外设的中断处理函数                                              */
 /******************************************************************************/
 
 /**
-  * @brief 处理 TIM2 全局中断
+  * @brief 处理 TIM2 全局中断 (TIM2 Global Interrupt)
   */
 void TIM2_IRQHandler(void)
 {
@@ -213,7 +213,7 @@ void TIM2_IRQHandler(void)
 }
 
 /**
-  * @brief 处理 USART1 全局中断
+  * @brief 处理 USART1 全局中断 (USART1 Global Interrupt)
   */
 void USART1_IRQHandler(void)
 {
@@ -227,7 +227,7 @@ void USART1_IRQHandler(void)
 }
 
 /**
-  * @brief 处理 USART3 全局中断
+  * @brief 处理 USART3 全局中断 (USART3 Global Interrupt)
   */
 void USART3_IRQHandler(void)
 {

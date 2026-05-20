@@ -117,9 +117,9 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 
 /* USER CODE BEGIN 1 */
 /**************************************************************************
-函数功能：AD采样
-入口参数：ADC1 的通道
-返回  值：AD转换结果
+函数功能 (Function): AD 采样 (ADC Sampling)
+入口参数 (Input): ADC1 的通道 (Channel)
+返回  值 (Return): AD 转换结果 (ADC Conversion Result)
 **************************************************************************/
 u16 Get_Adc(u8 ch)
 {
@@ -139,14 +139,14 @@ u16 Get_Adc(u8 ch)
 
 
 /**************************************************************************
-函数功能：读取电池电压 
-入口参数：无
-返回  值：电池电压 单位MV
+函数功能 (Function): 读取电池电压 (Read Battery Voltage)
+入口参数 (Input): 无 (None)
+返回  值 (Return): 电池电压 (Battery Voltage), 单位 mV
 **************************************************************************/
 int Get_battery_volt(void)   
 {  
-	int Volt;//电池电压
-	Volt=Get_Adc(Battery_Ch)*3.3*11*100/4096;	//电阻分压，具体根据原理图简单分析可以得到	
+	int Volt;//电池电压 (Battery Voltage)
+	Volt=Get_Adc(Battery_Ch)*3.3*11*100/4096;	//电阻分压 (Resistor Divider), 具体根据原理图简单分析可以得到
 	//	if(Volt>1260)Volt=1260;
 	return Volt;
 }

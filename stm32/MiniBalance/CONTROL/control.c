@@ -1,6 +1,6 @@
 #include "control.h"
 
-// 全局状态变量
+// 全局状态变量 (Global State Variables)
 int Voltage_Temp, Voltage_Count, Voltage_All;
 u8 OpenMV_Target_Lost = 0;
 u8 OpenMV_Data_Stale = 0;
@@ -41,8 +41,8 @@ void Set_Pwm(float velocity1, float velocity2)
     Position1 = Clamp_Float(Position1, SERVO_BASE_MIN_PWM, SERVO_BASE_MAX_PWM);
     Position2 = Clamp_Float(Position2, SERVO_ARM_MIN_PWM, SERVO_ARM_MAX_PWM);
 
-    TIM4->CCR3 = Position1;  // PB8, 底舵机
-    TIM4->CCR4 = Position2;  // PB9, 摇臂舵机
+    TIM4->CCR3 = Position1;  // PB8, 底舵机 (Base Servo / Yaw)
+    TIM4->CCR4 = Position2;  // PB9, 摇臂舵机 (Arm Servo / Pitch)
 }
 
 u8 Turn_Off(int voltage)
@@ -86,9 +86,9 @@ static void OpenMV_Hold_Current_Position(void)
     OpenMV_Error_Y = 0.0f;
 }
 
-// OpenMV 视觉伺服 PD 控制器
-// 归一化误差(-0.5~+0.5) → PD → 速度输出
-// 软死区: 5px 内死区, 5-15px 二次缓动过渡, 15px+ 全响应
+// OpenMV 视觉伺服 (Visual Servo) PD 控制器 (PD Controller)
+// 归一化误差 (Normalized Error, -0.5~+0.5) → PD → 速度输出 (Velocity Output)
+// 软死区 (Soft Deadzone): 5px 内死区, 5-15px 二次缓动过渡 (Quadratic Easing), 15px+ 全响应 (Full Response)
 void OpenMV_Control(void)
 {
     static uint32_t last_frame_tick = 0;
@@ -125,7 +125,7 @@ void OpenMV_Control(void)
         return;
     }
 
-    // 临界区保护: 复制载荷数据
+    // 临界区保护 (Critical Section): 复制载荷数据 (Copy Payload)
     primask = __get_PRIMASK();
     __disable_irq();
     for(i = 0; i < OPENMV_PAYLOAD_LEN; i++)
@@ -158,7 +158,7 @@ void OpenMV_Control(void)
         float new_error_x = ((float)target_x - OPENMV_CENTER_X) / 255.0f;
         float new_error_y = ((float)target_y - OPENMV_CENTER_Y) / 255.0f;
 
-        // 软死区: 二次缓动过渡
+        // 软死区 (Soft Deadzone): 二次缓动过渡 (Quadratic Easing)
         int raw_dx = (int)(target_x - OPENMV_CENTER_X);
         int raw_dy = (int)(target_y - OPENMV_CENTER_Y);
         int abs_dx = raw_dx < 0 ? -raw_dx : raw_dx;
@@ -185,7 +185,7 @@ void OpenMV_Control(void)
         OpenMV_Error_X = new_error_x;
         OpenMV_Error_Y = new_error_y;
 
-        // PD 控制 (默认为纯 P, KD=0)
+        // PD 控制 (PD Control, 默认为纯 P / Pure P, KD=0)
         float alpha = PD_EMA_ALPHA;
         float filtered_yaw   = alpha * ((new_error_x - last_error_x) / 0.1f) + (1.0f - alpha) * yaw_deriv;
         float filtered_pitch = alpha * ((new_error_y - last_error_y) / 0.1f) + (1.0f - alpha) * pitch_deriv;
