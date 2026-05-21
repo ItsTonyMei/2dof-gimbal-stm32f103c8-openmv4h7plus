@@ -30,11 +30,11 @@ PITCH_DIR = 1   # 摇臂舵机 (Arm / Pitch) P9:  1=正向 (Normal), -1=反向 (
 
 CAMERA_WINDOW_W = 320  # VGA 640×480 → 缩小窗口 (Window) 提升模型空间分辨率 (Spatial Resolution)
 CAMERA_WINDOW_H = 320
-BLAZEFACE_THRESHOLD = 0.5  # 人脸检测置信度阈值 (Confidence Threshold) — 降低=更远可检, 但可能误检 (False Positive)
+BLAZEFACE_THRESHOLD = 0.55  # 人脸检测置信度阈值 (Confidence Threshold) — 降低=更远可检, 但可能误检 (False Positive)
 
 CAMERA_HMIRROR = True   # 水平镜像 (Horizontal Mirror)
 CAMERA_VFLIP   = True   # 垂直翻转 (Vertical Flip)
-DRAW_ENABLE    = False  # 绘图开关 (Draw Overlay) — IDE 调试时改为 True, 脱机运行保持 False
+DRAW_ENABLE    = True  # 绘图开关 (Draw Overlay) — IDE 调试时改为 True, 脱机运行保持 False
 
 # ============================================================
 # 追踪参数 (Tracking)
@@ -52,8 +52,8 @@ SERVO_ARM_PIN  = "P9"       # 摇臂舵机 (Arm / Pitch) — 扩展板舵机接�
 SERVO_FREQ = 50             # PWM 频率 (Hz)
 
 SERVO_BASE_NEUTRAL = 1500000  # 底舵机中位 (Neutral) 1500us
-SERVO_BASE_MIN_NS  = 500000   # 底舵机最小脉宽 (Min Pulse) 500us
-SERVO_BASE_MAX_NS  = 2500000  # 底舵机最大脉宽 (Max Pulse) 2500us
+SERVO_BASE_MIN_NS  = 1000000  # 底舵机最小脉宽 (Min Pulse) 1000us
+SERVO_BASE_MAX_NS  = 2000000  # 底舵机最大脉宽 (Max Pulse) 2000us
 SERVO_ARM_NEUTRAL  = 1500000  # 摇臂舵机中位 (Neutral) 1500us
 SERVO_ARM_MIN_NS   = 1000000  # 摇臂舵机最小脉宽 (Min Pulse) 1000us
 SERVO_ARM_MAX_NS   = 2000000  # 摇臂舵机最大脉宽 (Max Pulse) 2000us
@@ -67,13 +67,13 @@ CAM_CY = CAMERA_WINDOW_H // 2  # 图像中心 Y (Image Center) — 160
 
 KP = 0.2            # 比例增益 (Proportional Gain): 误差→速度 (增大=更快响应)
 KD = 0.35           # 微分增益 (Derivative Gain): 抑制震荡 (增大=更强阻尼 / Damping)
-DERIV_DEAD = 5      # 导数死区 (Derivative Deadzone, px) — 过滤检测噪声 (Detection Noise) 防微抖 (Micro-Jitter)
+DERIV_DEAD = 7      # 导数死区 (Derivative Deadzone, px) — 过滤检测噪声 (Detection Noise) 防微抖 (Micro-Jitter)
 
 PD_DEAD_INNER = 13  # 位置死区内径 (Position Deadzone Inner, px) — 完全死区, 加宽防微抖
 PD_DEAD_OUTER = 27  # 位置死区外径 (Position Deadzone Outer, px) — 过渡区外边界
 
 SERVO_GAIN = 18000    # 像素误差→舵机速度换算 (Error-to-Speed Gain, ns/s per pixel, 320窗补偿)
-MAX_STEP_NS = 35000   # 单帧最大步进 (Max Step per Tick, ns)
+MAX_STEP_NS = 25000   # 单帧最大步进 (Max Step per Tick, ns)
 PWM_DEAD_NS = 5000    # PWM 输出死区 (Output Deadzone, ns) — 不够 5us 不更新, 防微抖
 
 CONTROL_EVERY_N = 1   # 控制频率除数 (Control Divider) — 每 N 帧执行舵机控制 (~70Hz, 丝滑)
