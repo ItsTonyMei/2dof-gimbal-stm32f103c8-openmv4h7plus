@@ -66,14 +66,14 @@ CAM_CX = CAMERA_WINDOW_W // 2  # 图像中心 X (Image Center) — 160
 CAM_CY = CAMERA_WINDOW_H // 2  # 图像中心 Y (Image Center) — 160
 
 KP = 0.2            # 比例增益 (Proportional Gain): 误差→速度 (增大=更快响应)
-KD = 0.1            # 微分增益 (Derivative Gain): 抑制震荡 (增大=更强阻尼 / Damping)
+KD = 0.35           # 微分增益 (Derivative Gain): 抑制震荡 (增大=更强阻尼 / Damping)
 DERIV_DEAD = 5      # 导数死区 (Derivative Deadzone, px) — 过滤检测噪声 (Detection Noise) 防微抖 (Micro-Jitter)
 
 PD_DEAD_INNER = 13  # 位置死区内径 (Position Deadzone Inner, px) — 完全死区, 加宽防微抖
 PD_DEAD_OUTER = 27  # 位置死区外径 (Position Deadzone Outer, px) — 过渡区外边界
 
 SERVO_GAIN = 18000    # 像素误差→舵机速度换算 (Error-to-Speed Gain, ns/s per pixel, 320窗补偿)
-MAX_STEP_NS = 50000   # 单帧最大步进 (Max Step per Tick, ns)
+MAX_STEP_NS = 35000   # 单帧最大步进 (Max Step per Tick, ns)
 PWM_DEAD_NS = 5000    # PWM 输出死区 (Output Deadzone, ns) — 不够 5us 不更新, 防微抖
 
 CONTROL_EVERY_N = 1   # 控制频率除数 (Control Divider) — 每 N 帧执行舵机控制 (~70Hz, 丝滑)
@@ -251,9 +251,9 @@ def servo_control(cx, cy, has_target):
     err_x = deadzone(raw_px, PD_DEAD_INNER, PD_DEAD_OUTER)
     err_y = deadzone(raw_py, PD_DEAD_INNER, PD_DEAD_OUTER)
 
-    # ---- PD (导数用原始误差; 死区内强制切除 D 项防检测噪声) ----
-    derr_x = raw_px - last_err_px if err_x != 0.0 else 0.0
-    derr_y = raw_py - last_err_py if err_y != 0.0 else 0.0
+    # ---- PD (导数用原始误差; DERIV_DEAD 过滤检测噪声, 死区内保留 D 项以制动惯性滑行) ----
+    derr_x = raw_px - last_err_px
+    derr_y = raw_py - last_err_py
     if abs(derr_x) <= DERIV_DEAD: derr_x = 0.0
     if abs(derr_y) <= DERIV_DEAD: derr_y = 0.0
     deriv_px = derr_x / dt_s if derr_x != 0.0 else 0.0
