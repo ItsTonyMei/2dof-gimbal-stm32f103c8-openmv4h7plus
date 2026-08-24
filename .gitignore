@@ -1,27 +1,10 @@
-stm32/build_gcc/
-stm32/OBJ/
-openmv/__pycache__/
+# Python / MicroPython
+__pycache__/
 *.pyc
+
+# 模型文件 (Model Files)
 *.tflite
-yolov8n_*.txt
+
+# IDE / 工具
 .claude/
 .remember/
-tools/FlyMcu/FlyMcuConfig.ini
-tools/FlyMcu/ProgramLogs.txt
-stm32/MDK-ARM/*.uvguix.*
-
-# Keil MDK / csolution build artifacts & IDE config
-stm32/MDK-ARM/.clangd
-stm32/MDK-ARM/.cmsis/
-stm32/MDK-ARM/.vscode/
-stm32/MDK-ARM/*.yml
-stm32/MDK-ARM/*.sct
-stm32/MDK-ARM/build/
-stm32/MDK-ARM/out/
-stm32/MDK-ARM/tmp/
-stm32/MDK-ARM/*.log
-stm32/MDK-ARM/vcpkg-configuration.json
-stm32/MDK-ARM/RTE/
-__pycache__/
-st_ai_output/
-st_ai_ws/
